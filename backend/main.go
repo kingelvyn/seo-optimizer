@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -32,15 +34,18 @@ func main() {
 	r.Use(middleware.ErrorHandler())
 	r.Use(rateLimiter.RateLimit())
 
-	// Enable CORS
+	// Enhanced CORS configuration
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "https://seo-optimizer.elvynprise.xyz")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+
 		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
+
 		c.Next()
 	})
 
@@ -59,8 +64,14 @@ func main() {
 		api.POST("/analyze", analyzeURL)
 	}
 
-	log.Println("Server starting on http://localhost:8081")
-	if err := r.Run(":8081"); err != nil {
+	// Get port from environment variable or use default
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8082" // Default port
+	}
+
+	log.Printf("Server starting on http://localhost:%s\n", port)
+	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

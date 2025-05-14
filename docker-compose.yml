@@ -21,15 +21,16 @@ services:
       dockerfile: Dockerfile
     environment:
       - GIN_MODE=release
+      - PORT=8082
     ports:
-      - "8081:8081"
+      - "8082:8082"
     networks:
       - seo-network
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`seo-optimizer.elvynprise.xyz`) && PathPrefix(`/api`)"
-      - "traefik.http.services.backend.loadbalancer.server.port=8081"
+      - "traefik.http.services.backend.loadbalancer.server.port=8082"
 
 networks:
   seo-network:
