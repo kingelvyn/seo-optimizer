@@ -61,6 +61,8 @@ function App() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const apiUrl = process.env.REACT_APP_API_URL || '/api';
+
   const handleAnalyze = useCallback(async () => {
     if (!url) {
       setError('Please enter a URL');
@@ -71,7 +73,7 @@ function App() {
       setLoading(true);
       setError(null);
       
-      const response = await fetch('http://localhost:8080/api/analyze', {
+      const response = await fetch(`${apiUrl}/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -90,7 +92,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [url]);
+  }, [url, apiUrl]);
 
   const formatBytes = useCallback((bytes: number) => {
     if (bytes === 0) return '0 Bytes';
