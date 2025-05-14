@@ -58,8 +58,8 @@ func main() {
 		api.POST("/analyze", analyzeURL)
 	}
 
-	log.Println("Server starting on http://localhost:8080")
-	if err := r.Run(":8080"); err != nil {
+	log.Println("Server starting on http://localhost:8081")
+	if err := r.Run(":8081"); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }
