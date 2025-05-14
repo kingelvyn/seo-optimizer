@@ -49,6 +49,7 @@ func main() {
 	{
 		// Health check
 		api.GET("/health", func(c *gin.Context) {
+			log.Printf("Health check request received from: %s\n", c.Request.RemoteAddr)
 			c.JSON(http.StatusOK, gin.H{
 				"status": "ok",
 			})
@@ -65,6 +66,7 @@ func main() {
 }
 
 func analyzeURL(c *gin.Context) {
+	log.Printf("Analyze request received from: %s for URL: %s\n", c.Request.RemoteAddr, c.Request.URL.String())
 	var request struct {
 		URL string `json:"url" binding:"required,url"`
 	}
