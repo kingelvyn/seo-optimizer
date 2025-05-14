@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - seo-network
+    restart: unless-stopped
+    environment:
+      - REACT_APP_API_URL=http://backend:8080
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - GIN_MODE=release
+    expose:
+      - "8080"
+    networks:
+      - seo-network
+    restart: unless-stopped
+
+networks:
+  seo-network:
+    driver: bridge 
