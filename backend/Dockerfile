@@ -24,8 +24,11 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/main .
 
-# Expose port 8080
-EXPOSE 8080
+# Expose port 8081
+EXPOSE 8081
+
+# Set environment variable for the port
+ENV PORT=8081
 
 # Run the binary
 CMD ["./main"] 
