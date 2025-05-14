@@ -16,8 +16,10 @@ RUN go mod download -x
 # Copy source code
 COPY . .
 
-# Build the application with verbose output
-RUN CGO_ENABLED=0 GOOS=linux go build -v -o main .
+# Build the application with verbose output and debugging
+RUN set -x && \
+    go env && \
+    CGO_ENABLED=0 GOOS=linux go build -v -x -o main . 2>&1
 
 # Final stage
 FROM alpine:latest
