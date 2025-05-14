@@ -1,7 +1,7 @@
 # Build stage
 FROM golang:1.24-alpine AS builder
 
-# Install build tools
+# Install build tools and debugging utilities
 RUN apk add --no-cache git gcc musl-dev
 
 # Set working directory
@@ -10,16 +10,23 @@ WORKDIR /app
 # Copy go mod and sum files
 COPY go.mod go.sum ./
 
-# Download dependencies with verbose output
-RUN go mod download -x
+# Show environment and download dependencies with debug output
+RUN pwd && \
+    ls -la && \
+    go version && \
+    go env && \
+    go mod download -x > /tmp/build.log 2>&1
 
 # Copy source code
 COPY . .
 
-# Build the application with verbose output and debugging
-RUN set -x && \
-    go env && \
-    CGO_ENABLED=0 GOOS=linux go build -v -x -o main . 2>&1
+# Build with extensive debugging
+RUN echo "=== Building Application ===" >> /tmp/build.log 2>&1 && \
+    pwd >> /tmp/build.log 2>&1 && \
+    ls -la >> /tmp/build.log 2>&1 && \
+    go list -m all >> /tmp/build.log 2>&1 && \
+    CGO_ENABLED=0 GOOS=linux go build -v -x -o main . >> /tmp/build.log 2>&1 || \
+    (cat /tmp/build.log && exit 1)
 
 # Final stage
 FROM alpine:latest
