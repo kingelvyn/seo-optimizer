@@ -14,6 +14,8 @@ services:
     restart: unless-stopped
     environment:
       - REACT_APP_API_URL=/api
+    security_opt:
+      - no-new-privileges:true
 
   backend:
     build:
@@ -23,6 +25,8 @@ services:
       - GIN_MODE=release
       - PORT=8082
       - DOCKER_NETWORK=172.0.0.0/8
+      - RATE_LIMIT_REQUESTS=10
+      - RATE_LIMIT_DURATION=1
     ports:
       - "8082:8082"
     networks:
@@ -30,6 +34,11 @@ services:
     restart: unless-stopped
     volumes:
       - seo-stats:/app/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`seo-optimizer.elvynprise.xyz`) && PathPrefix(`/api`)"

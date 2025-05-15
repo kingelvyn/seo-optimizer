@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -46,13 +47,44 @@ func setupTrustedProxies(r *gin.Engine) error {
 	}
 
 	// In production, trust Docker's internal network
-	// Get Docker network CIDR
 	dockerNetwork := os.Getenv("DOCKER_NETWORK")
 	if dockerNetwork == "" {
 		dockerNetwork = "172.0.0.0/8" // Default Docker network
 	}
 	
 	return r.SetTrustedProxies([]string{dockerNetwork})
+}
+
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Security headers
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
+		
+		// Remove sensitive headers
+		c.Header("Server", "")
+		c.Next()
+	}
+}
+
+func getRateLimitConfig() (int, int) {
+	requestsStr := os.Getenv("RATE_LIMIT_REQUESTS")
+	durationStr := os.Getenv("RATE_LIMIT_DURATION")
+	
+	requests, err := strconv.Atoi(requestsStr)
+	if err != nil || requests <= 0 {
+		requests = 2 // Default: 2 requests
+	}
+	
+	duration, err := strconv.Atoi(durationStr)
+	if err != nil || duration <= 0 {
+		duration = 1 // Default: 1 second
+	}
+	
+	return requests, duration
 }
 
 func main() {
@@ -64,7 +96,8 @@ func main() {
 
 	// Initialize services
 	seoAnalyzer = analyzer.New()
-	rateLimiter = middleware.NewRateLimiter(2, 5) // 2 requests per second, bucket size of 5
+	requests, duration := getRateLimitConfig()
+	rateLimiter = middleware.NewRateLimiter(float64(requests), float64(duration * 5)) // Convert to float64
 
 	// Initialize statistics
 	stats := logging.Initialize()
@@ -77,16 +110,27 @@ func main() {
 		log.Printf("Warning: Failed to set trusted proxies: %v\n", err)
 	}
 
+	// Add security headers
+	r.Use(securityHeaders())
+	
 	// Add middlewares
 	r.Use(middleware.ErrorHandler())
 	r.Use(rateLimiter.RateLimit())
 	
-	// CORS middleware
+	// CORS middleware with more restrictive settings
 	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		// In development, allow all origins
+		origin := "*"
+		if os.Getenv("GIN_MODE") == "release" {
+			// In production, restrict to your domain
+			origin = "https://seo-optimizer.elvynprise.xyz"
+		}
+		
+		c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, Authorization")
+		c.Writer.Header().Set("Access-Control-Max-Age", "86400") // 24 hours
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
