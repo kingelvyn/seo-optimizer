@@ -39,6 +39,22 @@ func setupGinMode() {
 	gin.SetMode(mode)
 }
 
+func setupTrustedProxies(r *gin.Engine) error {
+	// In development, trust only localhost
+	if os.Getenv("GIN_MODE") == "debug" {
+		return r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
+
+	// In production, trust Docker's internal network
+	// Get Docker network CIDR
+	dockerNetwork := os.Getenv("DOCKER_NETWORK")
+	if dockerNetwork == "" {
+		dockerNetwork = "172.0.0.0/8" // Default Docker network
+	}
+	
+	return r.SetTrustedProxies([]string{dockerNetwork})
+}
+
 func main() {
 	// Load environment configuration
 	loadEnv()
@@ -55,6 +71,11 @@ func main() {
 
 	// Initialize Gin router
 	r := gin.Default()
+
+	// Set up trusted proxies
+	if err := setupTrustedProxies(r); err != nil {
+		log.Printf("Warning: Failed to set trusted proxies: %v\n", err)
+	}
 
 	// Add middlewares
 	r.Use(middleware.ErrorHandler())
