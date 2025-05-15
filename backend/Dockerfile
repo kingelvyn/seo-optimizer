@@ -42,5 +42,8 @@ EXPOSE 8081
 # Set environment variable for the port
 ENV PORT=8081
 
+# Set environment variables
+ENV DEV_MODE=false
+
 # Run the binary
 CMD ["./main"] 

@@ -5,6 +5,7 @@ import SeoSuggestions from './components/SeoSuggestions';
 import ScoreIndicator from './components/ScoreIndicator';
 import AnalysisProgress from './components/AnalysisProgress';
 import SectionInfo from './components/SectionInfo';
+import Statistics from './components/Statistics';
 
 interface AnalysisResult {
   url: string;
@@ -421,6 +422,8 @@ function App() {
 
         {error && <div className="error-message">{error}</div>}
         {loading ? renderLoadingSkeleton() : analysisContent}
+        
+        <Statistics apiUrl={apiUrl} />
       </header>
       <footer className="footer">
         <span>

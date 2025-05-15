@@ -1,15 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+
 	"github.com/seo-optimizer/backend/analyzer"
 	"github.com/seo-optimizer/backend/middleware"
+	"github.com/seo-optimizer/backend/logging"
 )
 
 var (
@@ -27,30 +29,19 @@ func main() {
 	seoAnalyzer = analyzer.New()
 	rateLimiter = middleware.NewRateLimiter(2, 5) // 2 requests per second, bucket size of 5
 
+	// Initialize statistics
+	stats := logging.Initialize()
+
 	// Initialize Gin router
 	r := gin.Default()
 
 	// Add middlewares
 	r.Use(middleware.ErrorHandler())
 	r.Use(rateLimiter.RateLimit())
-
-	// Enhanced CORS configuration
+	
+	// CORS middleware
 	r.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		allowedOrigins := []string{
-			"https://seo-optimizer.elvynprise.xyz",
-			"http://localhost:3001",
-			"http://localhost:3000",
-		}
-
-		// Check if the request origin is allowed
-		for _, allowedOrigin := range allowedOrigins {
-			if origin == allowedOrigin {
-				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-				break
-			}
-		}
-
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
@@ -63,12 +54,36 @@ func main() {
 		c.Next()
 	})
 
+	// Convert standard middleware to Gin middleware
+	r.Use(func(c *gin.Context) {
+		start := time.Now()
+		
+		// Get the real IP address
+		ip := c.ClientIP()
+		
+		// Track unique visitor
+		stats.TrackVisitor(ip)
+		
+		c.Next()
+		
+		// Only track analysis requests
+		if c.Request.URL.Path == "/api/analyze" && c.Request.Method == "POST" {
+			loadTime := float64(time.Since(start).Milliseconds())
+			stats.TrackAnalysis(c.Request.URL.String(), loadTime, c.Writer.Status() >= 400)
+		}
+		
+		// Periodically save statistics
+		if stats.GetStatistics()["totalRequests"].(int)%100 == 0 {
+			go stats.Save()
+		}
+	})
+
 	// API routes
 	api := r.Group("/api")
 	{
 		// Health check
 		api.GET("/health", func(c *gin.Context) {
-			log.Printf("Health check request received from: %s\n", c.Request.RemoteAddr)
+			log.Printf("Health check request received from: %s\n", c.ClientIP())
 			c.JSON(http.StatusOK, gin.H{
 				"status": "ok",
 			})
@@ -76,6 +91,11 @@ func main() {
 
 		// SEO analysis endpoints
 		api.POST("/analyze", analyzeURL)
+		
+		// Statistics endpoint
+		api.GET("/statistics", func(c *gin.Context) {
+			c.JSON(http.StatusOK, stats.GetStatistics())
+		})
 	}
 
 	// Get port from environment variable or use default
@@ -85,13 +105,13 @@ func main() {
 	}
 
 	log.Printf("Server starting on http://localhost:%s\n", port)
-	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
+	if err := r.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }
 
 func analyzeURL(c *gin.Context) {
-	log.Printf("Analyze request received from: %s for URL: %s\n", c.Request.RemoteAddr, c.Request.URL.String())
+	log.Printf("Analyze request received from: %s\n", c.ClientIP())
 	var request struct {
 		URL string `json:"url" binding:"required,url"`
 	}
