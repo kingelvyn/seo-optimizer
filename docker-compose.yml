@@ -27,6 +27,8 @@ services:
     networks:
       - seo-network
     restart: unless-stopped
+    volumes:
+      - seo-stats:/app/data
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`seo-optimizer.elvynprise.xyz`) && PathPrefix(`/api`)"
@@ -34,4 +36,7 @@ services:
 
 networks:
   seo-network:
-    driver: bridge 
+    driver: bridge
+
+volumes:
+  seo-stats: 

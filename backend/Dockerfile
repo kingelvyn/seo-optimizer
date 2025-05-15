@@ -33,11 +33,12 @@ FROM alpine:latest
 
 WORKDIR /app
 
+# Create data directory with proper permissions
+RUN mkdir -p /app/data && \
+    chmod 777 /app/data
+
 # Copy binary from builder
 COPY --from=builder /app/main .
-
-# Create a directory for statistics
-RUN mkdir -p /app/data
 
 # Expose port 8081
 EXPOSE 8081
