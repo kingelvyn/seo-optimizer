@@ -5,7 +5,7 @@ interface Statistics {
   totalRequests: number;
   errorRate: number;
   averageLoadTime: number;
-  popularUrls: { [key: string]: number };
+  popularUrls?: { [key: string]: number };
 }
 
 interface StatisticsProps {
@@ -88,20 +88,22 @@ const Statistics: React.FC<StatisticsProps> = ({ apiUrl }) => {
           </div>
         </div>
         
-        <div className="popular-urls">
-          <h4>Most Analyzed URLs</h4>
-          <ul>
-            {Object.entries(stats.popularUrls)
-              .sort(([, a], [, b]) => b - a)
-              .slice(0, 5)
-              .map(([url, count]) => (
-                <li key={url}>
-                  <span className="url-text">{url}</span>
-                  <span className="url-count">{count}</span>
-                </li>
-              ))}
-          </ul>
-        </div>
+        {stats.popularUrls && Object.keys(stats.popularUrls).length > 0 && (
+          <div className="popular-urls">
+            <h4>📊 Most Analyzed URLs</h4>
+            <ul>
+              {Object.entries(stats.popularUrls)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 5)
+                .map(([url, count]) => (
+                  <li key={url}>
+                    <span className="url-text">{url}</span>
+                    <span className="url-count">{count}</span>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );
