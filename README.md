@@ -15,27 +15,45 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Visual score indicators
 - Detailed recommendations for improvement
 - Modern, responsive UI
+- Statistics Dashboard:
+  - Unique visitors tracking
+  - Analysis request monitoring
+  - Error rate tracking
+  - Average load time metrics
+  - Most analyzed URLs (development mode)
+- Environment-aware configuration
+- Persistent statistics storage
 
 ## Tech Stack
 
 ### Backend
-- Go 1.x
+- Go 1.21
 - Gin web framework
 - goquery for HTML parsing
+- Custom statistics tracking
 
 ### Frontend
 - React 18
 - TypeScript
 - Modern CSS
+- Real-time statistics updates
+
+### Infrastructure
+- Docker
+- Docker Compose
+- Nginx
+- Traefik (optional)
+- Persistent volumes for data storage
 
 ## Getting Started
 
 ### Prerequisites
-- Go 1.x
-- Node.js 16+
-- npm or yarn
+- Docker and Docker Compose
+- Go 1.21 (for local development)
+- Node.js 16+ (for local development)
+- npm or yarn (for local development)
 
-### Installation
+### Docker Deployment
 
 1. Clone the repository
 ```bash
@@ -43,27 +61,39 @@ git clone https://github.com/yourusername/seo-optimizer.git
 cd seo-optimizer
 ```
 
-2. Install backend dependencies
+2. Create environment files
+```bash
+cp backend/.env.template backend/.env
+```
+
+3. Build and run with Docker Compose
+```bash
+docker-compose up --build -d
+```
+
+The application will be available at `http://localhost:3001`
+
+### Local Development
+
+1. Install backend dependencies
 ```bash
 cd backend
 go mod download
 ```
 
-3. Install frontend dependencies
+2. Install frontend dependencies
 ```bash
 cd frontend
 npm install
 ```
 
-### Running the Application
-
-1. Start the backend server
+3. Start the backend server (development mode)
 ```bash
 cd backend
-go run main.go
+DEV_MODE=true go run main.go
 ```
 
-2. Start the frontend development server
+4. Start the frontend development server
 ```bash
 cd frontend
 npm start
@@ -72,6 +102,33 @@ npm start
 The application will be available at `http://localhost:3000`
 
 ## API Endpoints
+
+### GET /api/statistics
+Retrieves current statistics (environment-aware)
+
+Response (Development):
+```json
+{
+  "uniqueVisitors24h": 100,
+  "totalRequests": 500,
+  "errorRate": 1.2,
+  "averageLoadTime": 250,
+  "popularUrls": {
+    "https://example.com": 50,
+    "https://another.com": 30
+  }
+}
+```
+
+Response (Production):
+```json
+{
+  "uniqueVisitors24h": 100,
+  "totalRequests": 500,
+  "errorRate": 1.2,
+  "averageLoadTime": 250
+}
+```
 
 ### POST /api/analyze
 Analyzes a website's SEO performance
@@ -97,6 +154,22 @@ Response:
   "recommendations": [ ... ]
 }
 ```
+
+## Configuration
+
+### Environment Variables
+
+Backend:
+- `DEV_MODE`: Enable/disable development features (default: false)
+- `PORT`: Server port (default: 8081)
+- `GIN_MODE`: Gin framework mode (default: release)
+
+Frontend:
+- `REACT_APP_API_URL`: Backend API URL (default: /api)
+
+## Data Persistence
+
+Statistics are stored in a Docker volume `seo-stats` and persist across container restarts and redeployments.
 
 ## Contributing
 
