@@ -19,11 +19,32 @@ var (
 	rateLimiter  *middleware.RateLimiter
 )
 
-func main() {
-	// Load environment variables
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found")
+func loadEnv() {
+	// Try to load .env.development first (for local development)
+	if err := godotenv.Load(".env.development"); err != nil {
+		// If .env.development doesn't exist, try regular .env
+		if err := godotenv.Load(); err != nil {
+			log.Println("No .env file found, using environment variables")
+		}
 	}
+}
+
+func setupGinMode() {
+	// Set Gin mode based on environment variable
+	mode := os.Getenv("GIN_MODE")
+	if mode == "" {
+		// Default to release mode if not specified
+		mode = gin.ReleaseMode
+	}
+	gin.SetMode(mode)
+}
+
+func main() {
+	// Load environment configuration
+	loadEnv()
+	
+	// Set up Gin mode
+	setupGinMode()
 
 	// Initialize services
 	seoAnalyzer = analyzer.New()
