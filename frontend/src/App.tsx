@@ -176,9 +176,9 @@ function App() {
       const severityValue = value as string;
       switch (severityValue) {
         case 'critical':
-          return <span className="status-indicator status-error">Critical</span>;
+          return <span className="status-indicator status-critical">Critical</span>;
         case 'major':
-          return <span className="status-indicator status-error">Major</span>;
+          return <span className="status-indicator status-critical">Major</span>;
         case 'moderate':
           return <span className="status-indicator status-warning">Moderate</span>;
         case 'minor':

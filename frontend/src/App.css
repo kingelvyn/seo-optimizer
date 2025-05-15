@@ -378,6 +378,11 @@ h1 {
   color: #dc2626;
 }
 
+.status-error {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
 .status-moderate {
   background-color: #dbeafe;
   color: #2563eb;
