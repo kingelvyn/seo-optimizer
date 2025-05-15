@@ -40,11 +40,11 @@ RUN mkdir -p /app/data && \
 # Copy binary from builder
 COPY --from=builder /app/main .
 
-# Expose port 8080
-EXPOSE 8080
+# Expose port 8081
+EXPOSE 8081
 
 # Set environment variables with defaults
-ENV PORT=8080 \
+ENV PORT=8081 \
     DEV_MODE=false \
     GIN_MODE=release
 
