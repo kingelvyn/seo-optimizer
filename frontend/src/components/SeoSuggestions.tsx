@@ -2,23 +2,31 @@ import React from 'react';
 
 interface SeoSuggestionsProps {
   title: {
+    title: string;
     length: number;
     hasTitle: boolean;
     score: number;
   };
   meta: {
+    description: string;
     descriptionLength: number;
     hasDescription: boolean;
+    keywords: string;
     hasKeywords: boolean;
+    robots: string;
+    viewport: string;
     score: number;
   };
   headers: {
     h1Count: number;
     h2Count: number;
+    h3Count: number;
+    h1Text: string[];
     score: number;
   };
   content: {
     wordCount: number;
+    keywordDensity: { [key: string]: number };
     hasImages: boolean;
     imagesWithAlt: number;
     totalImages: number;
@@ -32,6 +40,8 @@ interface SeoSuggestionsProps {
     pageSizeSeverity: string;
     loadTimeSeverity: string;
   };
+  metaSeverity: string;
+  recommendations: string[];
 }
 
 const SeoSuggestions: React.FC<SeoSuggestionsProps> = ({
@@ -40,6 +50,8 @@ const SeoSuggestions: React.FC<SeoSuggestionsProps> = ({
   headers,
   content,
   performance,
+  metaSeverity,
+  recommendations
 }) => {
   const getSuggestions = () => {
     const suggestions: { tip: string; priority: 'high' | 'medium' | 'low'; category: string }[] = [];
@@ -89,7 +101,23 @@ const SeoSuggestions: React.FC<SeoSuggestionsProps> = ({
     if (!meta.hasKeywords) {
       suggestions.push({
         tip: 'Add meta keywords to help search engines understand your content focus',
-        priority: 'low',
+        priority: 'medium',
+        category: 'Meta Tags',
+      });
+    }
+
+    if (!meta.robots) {
+      suggestions.push({
+        tip: 'Consider adding a robots meta tag to control search engine crawling',
+        priority: 'medium',
+        category: 'Meta Tags',
+      });
+    }
+
+    if (!meta.viewport) {
+      suggestions.push({
+        tip: 'Add a viewport meta tag for better mobile optimization',
+        priority: 'high',
         category: 'Meta Tags',
       });
     }
@@ -196,7 +224,10 @@ const SeoSuggestions: React.FC<SeoSuggestionsProps> = ({
 
   return (
     <div className="seo-suggestions">
-      <h3>Optimization Suggestions</h3>
+      <h3>
+        <span className="section-icon">O</span>
+        Optimization Suggestions
+      </h3>
       <div className="suggestions-container">
         {suggestions.map((suggestion, index) => (
           <div key={index} className={`suggestion-card ${suggestion.priority}`}>
@@ -207,6 +238,18 @@ const SeoSuggestions: React.FC<SeoSuggestionsProps> = ({
             </div>
           </div>
         ))}
+      </div>
+      
+      <div className="recommendations">
+        <h3>
+          <span className="section-icon">R</span>
+          Recommendations
+        </h3>
+        <ul>
+          {recommendations.map((recommendation: string, index: number) => (
+            <li key={index}>{recommendation}</li>
+          ))}
+        </ul>
       </div>
     </div>
   );

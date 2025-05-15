@@ -57,6 +57,26 @@ interface AnalysisResult {
   recommendations: string[];
 }
 
+const getImageAnalysisStatus = (total: number, withAlt: number) => {
+  if (total === 0) return { severity: 'critical', message: 'No images found - consider adding relevant images' };
+  const percentage = (withAlt / total) * 100;
+  if (percentage === 100) return { severity: 'good', message: 'All images have alt text' };
+  if (percentage >= 80) return { severity: 'moderate', message: 'Most images have alt text' };
+  return { severity: 'warning', message: 'Many images missing alt text - improve accessibility' };
+};
+
+const getMetaTagSeverity = (meta: any) => {
+  let score = 0;
+  if (meta.hasDescription) score += 30;
+  if (meta.hasKeywords) score += 20;
+  if (meta.viewport) score += 25;
+  if (meta.robots) score += 25;
+
+  if (score >= 90) return 'good';
+  if (score >= 70) return 'moderate';
+  return 'warning';
+};
+
 function App() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
@@ -193,6 +213,12 @@ function App() {
   const analysisContent = useMemo(() => {
     if (!result) return null;
     
+    const imageAnalysis = result.content ? 
+      getImageAnalysisStatus(result.content.totalImages, result.content.imagesWithAlt) : 
+      { severity: 'critical', message: 'No images analyzed' };
+
+    const metaSeverity = result.meta ? getMetaTagSeverity(result.meta) : 'warning';
+
     return (
       <div className="result-container">
         <h2>Analysis Results</h2>
@@ -207,6 +233,8 @@ function App() {
           headers={result.headers}
           content={result.content}
           performance={result.performance}
+          metaSeverity={metaSeverity}
+          recommendations={result.recommendations || []}
         />
 
         <div className="analysis-sections-grid">
@@ -298,8 +326,13 @@ function App() {
                 </p>
                 <p>
                   <strong>Images:</strong> 
-                  {result.content.totalImages} (with alt text: {result.content.imagesWithAlt})
-                  {getStatusIndicator(result.content.imagesWithAlt === result.content.totalImages, 'boolean')}
+                  {result.content.totalImages} 
+                  {result.content.totalImages > 0 && ` (${Math.round((result.content.imagesWithAlt / result.content.totalImages) * 100)}% with alt text)`}
+                  {getStatusIndicator(imageAnalysis.severity, 'severity')}
+                </p>
+                <p className="analysis-detail">
+                  <span className="detail-icon">ℹ️</span>
+                  {imageAnalysis.message}
                 </p>
               </div>
               <SectionInfo type="content" />
@@ -360,18 +393,6 @@ function App() {
               <SectionInfo type="links" />
             </div>
           )}
-
-          {/* Recommendations */}
-          {result.recommendations && result.recommendations.length > 0 && (
-            <div className="analysis-section recommendations">
-              <h3>Recommendations</h3>
-              <ul>
-                {result.recommendations.map((recommendation, index) => (
-                  <li key={index}>{recommendation}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -401,6 +422,12 @@ function App() {
         {error && <div className="error-message">{error}</div>}
         {loading ? renderLoadingSkeleton() : analysisContent}
       </header>
+      <footer className="footer">
+        <span>
+          <span className="copyright-symbol">&copy;</span>
+          Elvynprise 2025
+        </span>
+      </footer>
     </div>
   );
 }
