@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
 // Environment variable name for controlling statistics visibility
-const ENV_DEV_MODE = "DEV_MODE"
+const (
+	ENV_DEV_MODE = "DEV_MODE"
+	STATS_FILE   = "data/statistics.json"
+)
 
 // Statistics represents the collected statistics
 type Statistics struct {
@@ -161,7 +165,12 @@ func (s *Statistics) Save() error {
 	
 	s.LastPersisted = time.Now()
 	
-	file, err := os.Create("statistics.json")
+	// Ensure the data directory exists
+	if err := os.MkdirAll(filepath.Dir(STATS_FILE), 0755); err != nil {
+		return fmt.Errorf("could not create data directory: %v", err)
+	}
+	
+	file, err := os.Create(STATS_FILE)
 	if err != nil {
 		return fmt.Errorf("could not create statistics file: %v", err)
 	}
@@ -177,10 +186,14 @@ func (s *Statistics) Save() error {
 
 // Load reads the statistics from a file
 func (s *Statistics) Load() error {
-	file, err := os.Open("statistics.json")
+	file, err := os.Open(STATS_FILE)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // Not an error if file doesn't exist yet
+			// Initialize with empty statistics if file doesn't exist
+			s.UniqueVisitors = make(map[string]time.Time)
+			s.PopularURLs = make(map[string]int)
+			s.LastPersisted = time.Now()
+			return nil
 		}
 		return fmt.Errorf("could not open statistics file: %v", err)
 	}
@@ -188,7 +201,11 @@ func (s *Statistics) Load() error {
 	
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(s); err != nil {
-		return fmt.Errorf("could not decode statistics: %v", err)
+		// If there's an error decoding, initialize with empty statistics
+		s.UniqueVisitors = make(map[string]time.Time)
+		s.PopularURLs = make(map[string]int)
+		s.LastPersisted = time.Now()
+		return fmt.Errorf("could not decode statistics (initializing empty): %v", err)
 	}
 	
 	return nil

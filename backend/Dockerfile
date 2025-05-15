@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.21-alpine AS builder
 
 # Install build tools and debugging utilities
 RUN apk add --no-cache git gcc musl-dev
@@ -36,14 +36,16 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /app/main .
 
+# Create a directory for statistics
+RUN mkdir -p /app/data
+
 # Expose port 8081
 EXPOSE 8081
 
-# Set environment variable for the port
-ENV PORT=8081
-
-# Set environment variables
-ENV DEV_MODE=false
+# Set environment variables with defaults
+ENV PORT=8081 \
+    DEV_MODE=false \
+    GIN_MODE=release
 
 # Run the binary
 CMD ["./main"] 
