@@ -606,3 +606,123 @@ h1 {
 .analysis-section-header .score-indicator {
   flex-shrink: 0;
 }
+
+/* Analysis Progress Styles */
+.analysis-progress {
+  width: 100%;
+  max-width: 800px;
+  margin: 20px auto;
+  padding: 20px;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 20px;
+  background-color: #f0f0f0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 30px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4CAF50, #8BC34A);
+  transition: width 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.progress-text {
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.analysis-steps {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 20px;
+  position: relative;
+}
+
+.analysis-steps::before {
+  content: '';
+  position: absolute;
+  top: 15px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #e0e0e0;
+  z-index: 1;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+  flex: 1;
+}
+
+.step-indicator {
+  width: 30px;
+  height: 30px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 50%;
+  margin-bottom: 10px;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-indicator {
+  border-color: #4CAF50;
+  background: #4CAF50;
+}
+
+.step.completed .step-indicator {
+  background: #8BC34A;
+  border-color: #8BC34A;
+}
+
+.step-label {
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  max-width: 100px;
+}
+
+.step.active .step-label {
+  color: #4CAF50;
+  font-weight: bold;
+}
+
+/* Section Info Styles */
+.section-info {
+  background: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  margin-top: 10px;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.4;
+}
+
+.section-info h4 {
+  color: #333;
+  margin: 0 0 8px 0;
+}
+
+.section-info p {
+  margin: 0;
+}
+
+.section-info ul {
+  margin: 8px 0 0 0;
+  padding-left: 20px;
+}
+
+.section-info li {
+  margin: 4px 0;
+}

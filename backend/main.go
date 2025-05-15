@@ -36,7 +36,21 @@ func main() {
 
 	// Enhanced CORS configuration
 	r.Use(func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "https://seo-optimizer.elvynprise.xyz")
+		origin := c.Request.Header.Get("Origin")
+		allowedOrigins := []string{
+			"https://seo-optimizer.elvynprise.xyz",
+			"http://localhost:3001",
+			"http://localhost:3000",
+		}
+
+		// Check if the request origin is allowed
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")

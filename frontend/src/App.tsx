@@ -1,8 +1,10 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import './App.css';
 import LoadingSkeleton from './components/LoadingSkeleton';
 import SeoSuggestions from './components/SeoSuggestions';
 import ScoreIndicator from './components/ScoreIndicator';
+import AnalysisProgress from './components/AnalysisProgress';
+import SectionInfo from './components/SectionInfo';
 
 interface AnalysisResult {
   url: string;
@@ -60,8 +62,37 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState('init');
+  const [progress, setProgress] = useState(0);
 
-  const apiUrl = process.env.REACT_APP_API_URL || '/api';
+  const apiUrl = process.env.NODE_ENV === 'development' 
+    ? 'http://localhost:8082/api'
+    : (process.env.REACT_APP_API_URL || '/api');
+
+  // Simulate analysis progress
+  useEffect(() => {
+    if (!loading) {
+      setProgress(0);
+      setCurrentStep('init');
+      return;
+    }
+
+    const steps = ['init', 'meta', 'content', 'performance', 'links', 'final'];
+    const totalSteps = steps.length;
+    let currentStepIndex = 0;
+
+    const progressInterval = setInterval(() => {
+      if (currentStepIndex < totalSteps) {
+        setCurrentStep(steps[currentStepIndex]);
+        setProgress(Math.round((currentStepIndex + 1) * (100 / totalSteps)));
+        currentStepIndex++;
+      } else {
+        clearInterval(progressInterval);
+      }
+    }, 1000);
+
+    return () => clearInterval(progressInterval);
+  }, [loading]);
 
   const handleAnalyze = useCallback(async () => {
     if (!url) {
@@ -145,22 +176,7 @@ function App() {
     return (
       <div className="result-container">
         <h2>Analyzing...</h2>
-        <div className="skeleton-section">
-          <div className="skeleton-header">
-            <LoadingSkeleton lines={1} />
-          </div>
-          <div className="skeleton-content">
-            <LoadingSkeleton lines={3} />
-          </div>
-        </div>
-        <div className="skeleton-section">
-          <div className="skeleton-header">
-            <LoadingSkeleton lines={1} />
-          </div>
-          <div className="skeleton-content">
-            <LoadingSkeleton lines={4} />
-          </div>
-        </div>
+        <AnalysisProgress currentStep={currentStep} progress={progress} />
         <div className="skeleton-section">
           <div className="skeleton-header">
             <LoadingSkeleton lines={1} />
@@ -171,7 +187,7 @@ function App() {
         </div>
       </div>
     );
-  }, []);
+  }, [currentStep, progress]);
 
   // Memoize the analysis sections to prevent unnecessary re-renders
   const analysisContent = useMemo(() => {
@@ -208,6 +224,7 @@ function App() {
                 <p><strong>Title:</strong> {result.title.title || 'No title found'}</p>
                 <p><strong>Length:</strong> {result.title.length} characters</p>
               </div>
+              <SectionInfo type="title" />
             </div>
           )}
 
@@ -228,6 +245,7 @@ function App() {
                 <p><strong>Robots:</strong> {result.meta.robots || 'Not set'}</p>
                 <p><strong>Viewport:</strong> {result.meta.viewport || 'Not set'}</p>
               </div>
+              <SectionInfo type="meta" />
             </div>
           )}
 
@@ -256,6 +274,7 @@ function App() {
                   </div>
                 )}
               </div>
+              <SectionInfo type="headers" />
             </div>
           )}
 
@@ -283,6 +302,7 @@ function App() {
                   {getStatusIndicator(result.content.imagesWithAlt === result.content.totalImages, 'boolean')}
                 </p>
               </div>
+              <SectionInfo type="content" />
             </div>
           )}
 
@@ -312,6 +332,7 @@ function App() {
                   {getStatusIndicator(result.performance.mobileOptimized, 'boolean')}
                 </p>
               </div>
+              <SectionInfo type="performance" />
             </div>
           )}
 
@@ -336,6 +357,7 @@ function App() {
                     getStatusIndicator('good', 'severity')}
                 </p>
               </div>
+              <SectionInfo type="links" />
             </div>
           )}
 
