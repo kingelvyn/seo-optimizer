@@ -344,7 +344,7 @@ func analyzeURL(c *gin.Context) {
 		return
 	}
 
-	// Always track the analysis, but keep timing data
+	// Always track the analysis, but keep the timing data
 	loadTime := float64(time.Since(start).Milliseconds())
 	if stats := seoAnalyzer.GetStats(); stats != nil {
 		stats.TrackAnalysis(request.URL, loadTime, false)
