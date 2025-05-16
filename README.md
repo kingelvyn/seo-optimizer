@@ -16,13 +16,15 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Detailed recommendations for improvement
 - Modern, responsive UI
 - Statistics Dashboard:
-  - Monthly statistics tracking
+  - Monthly statistics tracking with persistence
   - Automatic data retention management
   - Unique visitors tracking
   - Analysis request monitoring
   - Error rate tracking
   - Average load time metrics
   - Most analyzed URLs (development mode)
+  - Cache performance metrics
+  - Graceful shutdown with data preservation
 - Environment-aware configuration
 - Persistent statistics storage with automatic cleanup
 
@@ -32,7 +34,13 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Go 1.21
 - Gin web framework
 - goquery for HTML parsing
-- Custom statistics tracking with persistence
+- Custom statistics tracking with:
+  - File-based persistence
+  - Atomic writes
+  - Monthly data rotation
+  - Graceful shutdown handling
+  - Automatic data migration
+  - Buffer-based write optimization
 - Automatic monthly data rotation
 
 ### Frontend
@@ -109,6 +117,47 @@ npm start
 ```
 
 The application will be available at `http://localhost:3000`
+
+## Data Persistence
+
+### Statistics Storage
+The application maintains persistent statistics across container restarts and redeployments:
+
+- Data Directory:
+  - Production: `/app/data`
+  - Development: `./data` (backend/data)
+- File Structure:
+  - `stats.json`: Current statistics data
+  - `stats.json.bak`: Backup of migrated data
+- Data Retention:
+  - Keeps current month and previous month
+  - Automatic cleanup at midnight
+  - Configurable retention period
+- Write Optimization:
+  - Buffer-based write system
+  - Atomic file operations
+  - Immediate write on shutdown
+- Migration Support:
+  - Automatic migration from old format
+  - Data preservation during upgrades
+
+### Graceful Shutdown
+The application implements graceful shutdown to ensure data persistence:
+
+- Catches system signals (SIGTERM/Interrupt)
+- Completes pending requests (30s timeout)
+- Saves statistics before exit
+- Cleans up resources
+- Logs shutdown process
+
+To properly stop the application:
+```bash
+# Using Docker Compose
+docker-compose down
+
+# Or send SIGTERM to the container
+docker stop seo-optimizer-backend-1
+```
 
 ## API Endpoints
 
@@ -198,20 +247,31 @@ Frontend:
 
 ## Data Persistence
 
-### Statistics Storage
-- Statistics are stored monthly and automatically managed
-- Only current and previous month's data are retained
-- Automatic cleanup runs daily at midnight
-- Data persists across container restarts and redeployments
+The application uses a robust file-based persistence system for statistics:
 
-### Storage Locations
-- Production: Docker volume `seo-stats` mounted at `/app/data`
-- Development: Local directory `./data` in the backend folder
+### Storage Format
+- JSON-based storage
+- Monthly statistics segregation
+- Automatic data cleanup
+- Migration support for format changes
 
-### Cache Management
-- Efficient in-memory caching with persistence
-- Automatic cache cleanup and size management
-- Configurable cache TTL and size limits
+### Write Optimization
+- Buffered writes for performance
+- Atomic file operations
+- Immediate write on shutdown
+- Automatic retry mechanism
+
+### Data Retention
+- Keeps current and previous month
+- Automatic cleanup at midnight
+- Configurable retention period
+- Safe data migration
+
+### Deployment Considerations
+- Use Docker volumes for persistence
+- Proper shutdown handling
+- Data directory permissions
+- Environment-specific paths
 
 ## Contributing
 
