@@ -15,16 +15,18 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Visual score indicators
 - Detailed recommendations for improvement
 - Modern, responsive UI
-- Statistics Dashboard:
+- Enhanced Statistics Dashboard:
   - Monthly statistics tracking with persistence
   - Automatic data retention management
   - Unique visitors tracking
   - Analysis request monitoring
   - Error rate tracking
   - Average load time metrics
-  - Most analyzed URLs (development mode)
+  - Private URL tracking (tracked but only visible in development)
   - Cache performance metrics
   - Graceful shutdown with data preservation
+  - Production-ready metrics display
+  - Development-only detailed URL analysis
 - Environment-aware configuration
 - Persistent statistics storage with automatic cleanup
 
@@ -34,13 +36,15 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Go 1.21
 - Gin web framework
 - goquery for HTML parsing
-- Custom statistics tracking with:
+- Enhanced statistics tracking with:
   - File-based persistence
   - Atomic writes
   - Monthly data rotation
   - Graceful shutdown handling
   - Automatic data migration
   - Buffer-based write optimization
+  - Private URL tracking
+  - Production/Development mode awareness
 - Automatic monthly data rotation
 
 ### Frontend
@@ -140,6 +144,11 @@ The application maintains persistent statistics across container restarts and re
 - Migration Support:
   - Automatic migration from old format
   - Data preservation during upgrades
+- Privacy Features:
+  - URL tracking in all environments
+  - URL visibility restricted to development mode
+  - Full statistics visible in production
+  - Secure data handling
 
 ### Graceful Shutdown
 The application implements graceful shutdown to ensure data persistence:
@@ -162,29 +171,25 @@ docker stop seo-optimizer-backend-1
 ## API Endpoints
 
 ### GET /api/statistics
-Retrieves current statistics (environment-aware)
+Retrieves current statistics with environment-aware response
 
-Response (Development):
-```json
-{
-  "uniqueVisitors24h": 100,
-  "totalRequests": 500,
-  "errorRate": 1.2,
-  "averageLoadTime": 250,
-  "popularUrls": {
-    "https://example.com": 50,
-    "https://another.com": 30
-  }
-}
-```
-
-Response (Production):
+Response (All Environments):
 ```json
 {
   "uniqueVisitors24h": 100,
   "totalRequests": 500,
   "errorRate": 1.2,
   "averageLoadTime": 250
+}
+```
+
+Additional Development Mode Data:
+```json
+{
+  "popularUrls": {
+    "https://example.com": 50,
+    "https://another.com": 30
+  }
 }
 ```
 
@@ -208,29 +213,20 @@ Response:
 ```
 
 ### POST /api/analyze
-Analyzes a website's SEO performance
+Analyzes a URL and tracks statistics
 
-Request body:
+Request:
 ```json
 {
   "url": "https://example.com"
 }
 ```
 
-Response:
-```json
-{
-  "url": "https://example.com",
-  "score": 85,
-  "title": { ... },
-  "meta": { ... },
-  "headers": { ... },
-  "content": { ... },
-  "performance": { ... },
-  "links": { ... },
-  "recommendations": [ ... ]
-}
-```
+Features:
+- Always tracks URLs for statistical purposes
+- Maintains URL privacy in production
+- Provides comprehensive analysis results
+- Updates statistics in real-time
 
 ## Configuration
 
