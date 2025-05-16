@@ -1,17 +1,53 @@
 package analyzer
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+)
+
+// Object pools for frequently allocated objects
+var (
+	bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
+	
+	urlSlicePool = sync.Pool{
+		New: func() interface{} {
+			return make([]string, 0, 100)
+		},
+	}
+	
+	mapPool = sync.Pool{
+		New: func() interface{} {
+			return make(map[string]bool, 100)
+		},
+	}
+	
+	analysisPool = sync.Pool{
+		New: func() interface{} {
+			return &SEOAnalysis{
+				Content: ContentAnalysis{
+					KeywordDensity: make(map[string]float64),
+				},
+				Headers: HeaderAnalysis{
+					H1Text: make([]string, 0, 5),
+				},
+			}
+		},
+	}
 )
 
 // Cache entry with expiration
@@ -45,6 +81,10 @@ type Analyzer struct {
 	linkCacheHits     int
 	analysisCacheMisses int
 	linkCacheMisses     int
+	maxCacheSize        int
+	maxLinkCacheSize    int
+	lastCleanup         time.Time
+	cleanupInterval     time.Duration
 }
 
 // Link cache entry
@@ -67,16 +107,128 @@ func New() *Analyzer {
 		DisableCompression:  false,            // Enable compression
 	}
 	
-	return &Analyzer{
+	analyzer := &Analyzer{
 		client: &http.Client{
 			Timeout:   15 * time.Second,
 			Transport: transport,
 		},
-		cache:        make(map[string]cacheEntry),
-		cacheTTL:     30 * time.Minute, // Cache results for 30 minutes
-		linkCache:    make(map[string]linkCacheEntry),
-		linkCacheTTL: 10 * time.Minute, // Cache link status for 10 minutes
+		cache:             make(map[string]cacheEntry),
+		cacheTTL:         30 * time.Minute, // Cache results for 30 minutes
+		linkCache:        make(map[string]linkCacheEntry),
+		linkCacheTTL:     10 * time.Minute, // Cache link status for 10 minutes
+		maxCacheSize:     1000,             // Maximum number of cached analyses
+		maxLinkCacheSize: 10000,            // Maximum number of cached link statuses
+		cleanupInterval:  5 * time.Minute,  // Run cleanup every 5 minutes
+		lastCleanup:      time.Now(),
 	}
+	
+	// Start cleanup goroutine
+	go analyzer.periodicCleanup()
+	
+	return analyzer
+}
+
+// periodicCleanup removes expired entries from both caches periodically
+func (a *Analyzer) periodicCleanup() {
+	ticker := time.NewTicker(a.cleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		a.cleanup()
+	}
+}
+
+// cleanup removes expired entries and ensures cache size limits
+func (a *Analyzer) cleanup() {
+	now := time.Now()
+	
+	// Cleanup analysis cache
+	a.cacheMutex.Lock()
+	for key, entry := range a.cache {
+		if now.Sub(entry.timestamp) > a.cacheTTL {
+			delete(a.cache, key)
+		}
+	}
+	
+	// If still over size limit, remove oldest entries
+	if len(a.cache) > a.maxCacheSize {
+		// Convert map to slice for sorting
+		entries := make([]struct {
+			key       string
+			timestamp time.Time
+		}, 0, len(a.cache))
+		
+		for key, entry := range a.cache {
+			entries = append(entries, struct {
+				key       string
+				timestamp time.Time
+			}{key, entry.timestamp})
+		}
+		
+		// Sort by timestamp
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].timestamp.Before(entries[j].timestamp)
+		})
+		
+		// Remove oldest entries until under limit
+		for i := 0; i < len(entries)-a.maxCacheSize; i++ {
+			delete(a.cache, entries[i].key)
+		}
+	}
+	a.cacheMutex.Unlock()
+	
+	// Cleanup link cache
+	a.linkCacheMutex.Lock()
+	for key, entry := range a.linkCache {
+		if now.Sub(entry.timestamp) > a.linkCacheTTL {
+			delete(a.linkCache, key)
+		}
+	}
+	
+	// If still over size limit, remove oldest entries
+	if len(a.linkCache) > a.maxLinkCacheSize {
+		// Convert map to slice for sorting
+		entries := make([]struct {
+			key       string
+			timestamp time.Time
+		}, 0, len(a.linkCache))
+		
+		for key, entry := range a.linkCache {
+			entries = append(entries, struct {
+				key       string
+				timestamp time.Time
+			}{key, entry.timestamp})
+		}
+		
+		// Sort by timestamp
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].timestamp.Before(entries[j].timestamp)
+		})
+		
+		// Remove oldest entries until under limit
+		for i := 0; i < len(entries)-a.maxLinkCacheSize; i++ {
+			delete(a.linkCache, entries[i].key)
+		}
+	}
+	a.linkCacheMutex.Unlock()
+	
+	a.lastCleanup = now
+}
+
+// SetMaxCacheSize sets the maximum number of entries in the analysis cache
+func (a *Analyzer) SetMaxCacheSize(size int) {
+	a.cacheMutex.Lock()
+	defer a.cacheMutex.Unlock()
+	a.maxCacheSize = size
+	a.cleanup() // Run cleanup immediately if new size is smaller
+}
+
+// SetMaxLinkCacheSize sets the maximum number of entries in the link cache
+func (a *Analyzer) SetMaxLinkCacheSize(size int) {
+	a.linkCacheMutex.Lock()
+	defer a.linkCacheMutex.Unlock()
+	a.maxLinkCacheSize = size
+	a.cleanup() // Run cleanup immediately if new size is smaller
 }
 
 // SetCacheTTL sets the cache TTL
@@ -142,6 +294,11 @@ func (a *Analyzer) IsCached(url string) bool {
 
 // Analyze performs a complete SEO analysis of the given URL
 func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
+	// Check if cleanup is needed
+	if time.Since(a.lastCleanup) > a.cleanupInterval {
+		go a.cleanup() // Run cleanup in background
+	}
+	
 	// Create a context with timeout for the entire analysis process
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -182,9 +339,16 @@ func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
 func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnalysis, error) {
 	startTime := time.Now()
 
+	// Get an analysis object from the pool
+	analysis := analysisPool.Get().(*SEOAnalysis)
+	analysis.URL = url
+	analysis.Content.KeywordDensity = make(map[string]float64)
+	analysis.Headers.H1Text = analysis.Headers.H1Text[:0]
+
 	// Create a request with context
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
+		analysisPool.Put(analysis)
 		return nil, err
 	}
 	
@@ -194,6 +358,7 @@ func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnal
 	// Fetch the page
 	resp, err := a.client.Do(req)
 	if err != nil {
+		analysisPool.Put(analysis)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -206,20 +371,26 @@ func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnal
 		}
 	}
 
-	// Read the entire body into a buffer
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
+	// Get a buffer from the pool
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	// Read the response body into the buffer
+	if _, err := io.Copy(buf, resp.Body); err != nil {
+		analysisPool.Put(analysis)
 		return nil, err
 	}
-	
-	// If we couldn't get the page size from headers, calculate it from the response
+
+	// If we couldn't get the page size from headers, calculate it from the buffer
 	if pageSize == 0 {
-		pageSize = len(bodyBytes)
+		pageSize = buf.Len()
 	}
-	
+
 	// Parse the HTML from the buffer
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(buf.Bytes()))
 	if err != nil {
+		analysisPool.Put(analysis)
 		return nil, err
 	}
 
@@ -236,15 +407,12 @@ func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnal
 	})
 
 	// Perform analysis with context awareness
-	analysis := &SEOAnalysis{
-		URL:         url,
-		Title:       a.analyzeTitleTag(doc),
-		Meta:        a.analyzeMetaTags(doc),
-		Headers:     a.analyzeHeaders(doc),
-		Content:     a.analyzeContent(doc),
-		Performance: a.analyzePerformance(pageSize, loadTime, mobileOptimized),
-		Links:       a.analyzeLinksWithContext(ctx, doc, url),
-	}
+	analysis.Title = a.analyzeTitleTag(doc)
+	analysis.Meta = a.analyzeMetaTags(doc)
+	analysis.Headers = a.analyzeHeaders(doc)
+	analysis.Content = a.analyzeContent(doc)
+	analysis.Performance = a.analyzePerformance(pageSize, loadTime, mobileOptimized)
+	analysis.Links = a.analyzeLinksWithContext(ctx, doc, url)
 
 	// Calculate overall score and recommendations
 	analysis.Score = a.calculateOverallScore(analysis)
@@ -447,8 +615,18 @@ func (a *Analyzer) analyzePerformance(pageSize int, loadTime time.Duration, mobi
 // analyzeLinksWithContext analyzes links with context awareness
 func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Document, baseURL string) LinkAnalysis {
 	links := LinkAnalysis{}
-	checkedLinks := make(map[string]bool)
-	var linkURLs []string
+	
+	// Get a map from the pool
+	checkedLinks := mapPool.Get().(map[string]bool)
+	for k := range checkedLinks {
+		delete(checkedLinks, k)
+	}
+	defer mapPool.Put(checkedLinks)
+	
+	// Get a URL slice from the pool
+	linkURLs := urlSlicePool.Get().([]string)
+	linkURLs = linkURLs[:0] // Reset the slice while keeping capacity
+	defer urlSlicePool.Put(linkURLs)
 
 	// First, collect all unique links
 	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
