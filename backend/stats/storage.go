@@ -31,6 +31,15 @@ type MonthlyStats struct {
 	LastUpdated         time.Time            `json:"last_updated"`
 }
 
+// NewMonthlyStats creates a new MonthlyStats instance with initialized maps
+func NewMonthlyStats() *MonthlyStats {
+	return &MonthlyStats{
+		UniqueVisitors: make(map[string]time.Time),
+		PopularUrls:    make(map[string]int),
+		LastUpdated:    time.Now(),
+	}
+}
+
 // Storage handles persistent storage of statistics
 type Storage struct {
 	mutex       sync.RWMutex
@@ -42,6 +51,8 @@ type Storage struct {
 
 // NewStorage creates a new statistics storage instance
 func NewStorage(dataDir string) (*Storage, error) {
+	log.Printf("Initializing storage with data directory: %s", dataDir)
+	
 	// Ensure data directory exists
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
@@ -51,12 +62,18 @@ func NewStorage(dataDir string) (*Storage, error) {
 	s := &Storage{
 		stats:       make(map[string]*MonthlyStats),
 		filePath:    filePath,
-		writeBuffer: make(chan struct{}, 1), // Buffer for write requests
+		writeBuffer: make(chan struct{}, 1),
 	}
+
+	// Initialize current month's stats
+	currentMonth := getCurrentMonth()
+	s.stats[currentMonth] = NewMonthlyStats()
+	log.Printf("Initialized current month stats: %s", currentMonth)
 
 	// Load existing stats if file exists
 	if err := s.load(); err != nil {
 		if !os.IsNotExist(err) {
+			log.Printf("Error loading existing stats: %v", err)
 			return nil, fmt.Errorf("failed to load stats: %w", err)
 		}
 		log.Printf("No existing stats file found, starting fresh")
@@ -178,59 +195,103 @@ func (s *Storage) migrateOldStats(dataDir string) error {
 
 // TrackVisitor records a unique visitor
 func (s *Storage) TrackVisitor(ip string) {
-	month := getCurrentMonth()
-	
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	stats, exists := s.stats[month]
-	if !exists {
-		stats = &MonthlyStats{
-			UniqueVisitors: make(map[string]time.Time),
-			PopularUrls:    make(map[string]int),
-		}
-		s.stats[month] = stats
+	if s == nil {
+		log.Printf("ERROR: Storage is nil in TrackVisitor")
+		return
+	}
+	if ip == "" {
+		log.Printf("WARNING: Empty IP address in TrackVisitor")
+		return
 	}
 
+	month := getCurrentMonth()
+	
+	// Check existence under read lock
+	s.mutex.RLock()
+	stats, exists := s.stats[month]
+	s.mutex.RUnlock()
+
+	if !exists {
+		s.mutex.Lock()
+		stats = NewMonthlyStats()
+		s.stats[month] = stats
+		s.mutex.Unlock()
+	}
+
+	// Update visitor under write lock
+	s.mutex.Lock()
 	stats.UniqueVisitors[ip] = time.Now()
 	stats.LastUpdated = time.Now()
+	s.mutex.Unlock()
 
-	if time.Since(s.lastWrite) > time.Minute {
-		s.requestWrite()
+	// Get count under read lock
+	s.mutex.RLock()
+	visitorCount := len(stats.UniqueVisitors)
+	s.mutex.RUnlock()
+
+	log.Printf("Tracked visitor IP: %s, total unique visitors: %d", ip, visitorCount)
+
+	// Check write timing under read lock
+	s.mutex.RLock()
+	shouldWrite := time.Since(s.lastWrite) > time.Minute
+	s.mutex.RUnlock()
+
+	if shouldWrite {
+		s.mutex.Lock()
 		s.lastWrite = time.Now()
+		s.mutex.Unlock()
+		s.requestWrite()
 	}
 }
 
 // TrackAnalysis records an analysis request
 func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
-	month := getCurrentMonth()
-	
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	stats, exists := s.stats[month]
-	if !exists {
-		stats = &MonthlyStats{
-			UniqueVisitors: make(map[string]time.Time),
-			PopularUrls:    make(map[string]int),
-		}
-		s.stats[month] = stats
+	if s == nil {
+		log.Printf("ERROR: Storage is nil in TrackAnalysis")
+		return
 	}
 
+	month := getCurrentMonth()
+	
+	// Use shorter lock duration for checking existence
+	s.mutex.RLock()
+	stats, exists := s.stats[month]
+	s.mutex.RUnlock()
+
+	if !exists {
+		s.mutex.Lock()
+		stats = NewMonthlyStats()
+		s.stats[month] = stats
+		s.mutex.Unlock()
+	}
+
+	// Update stats under a short-lived lock
+	s.mutex.Lock()
 	stats.AnalysisRequests++
 	stats.TotalRequests++
 	stats.TotalLoadTime += loadTime
 	if isError {
 		stats.ErrorCount++
 	}
-	stats.PopularUrls[url]++
+	if url != "" {
+		stats.PopularUrls[url]++
+	}
 	stats.LastUpdated = time.Now()
+	s.mutex.Unlock()
 
-	log.Printf("Updated stats after analysis: %+v", stats)
+	log.Printf("Updated stats after analysis for %s: requests=%d, total=%d, errors=%d", 
+		url, stats.AnalysisRequests, stats.TotalRequests, stats.ErrorCount)
 
-	if time.Since(s.lastWrite) > time.Minute {
-		s.requestWrite()
+	// Check write timing under a short lock
+	s.mutex.RLock()
+	shouldWrite := time.Since(s.lastWrite) > time.Minute
+	s.mutex.RUnlock()
+
+	if shouldWrite {
+		s.mutex.Lock()
 		s.lastWrite = time.Now()
+		s.mutex.Unlock()
+		s.requestWrite()
 	}
 }
 
@@ -308,16 +369,38 @@ func (s *Storage) load() error {
 
 // save writes statistics to file
 func (s *Storage) save() error {
+	// Create a copy of stats under read lock
 	s.mutex.RLock()
-	data, err := json.Marshal(s.stats)
+	statsCopy := make(map[string]*MonthlyStats)
+	for month, stats := range s.stats {
+		statsCopy[month] = &MonthlyStats{
+			AnalysisCacheHits:   stats.AnalysisCacheHits,
+			AnalysisCacheMisses: stats.AnalysisCacheMisses,
+			LinkCacheHits:       stats.LinkCacheHits,
+			LinkCacheMisses:     stats.LinkCacheMisses,
+			AnalysisRequests:    stats.AnalysisRequests,
+			ErrorCount:          stats.ErrorCount,
+			TotalLoadTime:       stats.TotalLoadTime,
+			TotalRequests:       stats.TotalRequests,
+			LastUpdated:         stats.LastUpdated,
+			UniqueVisitors:      make(map[string]time.Time),
+			PopularUrls:         make(map[string]int),
+		}
+		for k, v := range stats.UniqueVisitors {
+			statsCopy[month].UniqueVisitors[k] = v
+		}
+		for k, v := range stats.PopularUrls {
+			statsCopy[month].PopularUrls[k] = v
+		}
+	}
 	s.mutex.RUnlock()
 
+	// Marshal the copy
+	data, err := json.Marshal(statsCopy)
 	if err != nil {
 		log.Printf("Error marshaling stats: %v", err)
 		return fmt.Errorf("failed to marshal stats: %w", err)
 	}
-
-	log.Printf("Writing stats to file: %s", string(data))
 
 	// Write to temporary file first
 	tempFile := s.filePath + ".tmp"
@@ -380,56 +463,99 @@ func (s *Storage) requestWrite() {
 
 // IncrementStats increments the specified statistics
 func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMisses int) {
-	month := getCurrentMonth()
-	
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	stats, exists := s.stats[month]
-	if !exists {
-		stats = &MonthlyStats{
-			UniqueVisitors: make(map[string]time.Time),
-			PopularUrls:    make(map[string]int),
-		}
-		s.stats[month] = stats
+	if s == nil {
+		log.Printf("ERROR: Storage is nil in IncrementStats")
+		return
 	}
 
+	month := getCurrentMonth()
+	
+	// Check existence under read lock
+	s.mutex.RLock()
+	stats, exists := s.stats[month]
+	s.mutex.RUnlock()
+
+	if !exists {
+		s.mutex.Lock()
+		stats = NewMonthlyStats()
+		s.stats[month] = stats
+		s.mutex.Unlock()
+	}
+
+	// Update stats under write lock
+	s.mutex.Lock()
 	stats.AnalysisCacheHits += analysisHits
 	stats.AnalysisCacheMisses += analysisMisses
 	stats.LinkCacheHits += linkHits
 	stats.LinkCacheMisses += linkMisses
 	stats.LastUpdated = time.Now()
+	s.mutex.Unlock()
 
-	log.Printf("Updated stats after increment: %+v", stats)
+	log.Printf("Updated cache stats: hits=%d/%d, misses=%d/%d", 
+		stats.AnalysisCacheHits, stats.LinkCacheHits,
+		stats.AnalysisCacheMisses, stats.LinkCacheMisses)
 
-	// Request a write if enough time has passed
-	if time.Since(s.lastWrite) > time.Minute {
-		s.requestWrite()
+	// Check write timing under read lock
+	s.mutex.RLock()
+	shouldWrite := time.Since(s.lastWrite) > time.Minute
+	s.mutex.RUnlock()
+
+	if shouldWrite {
+		s.mutex.Lock()
 		s.lastWrite = time.Now()
+		s.mutex.Unlock()
+		s.requestWrite()
 	}
 }
 
 // GetCurrentStats returns statistics for the current month
 func (s *Storage) GetCurrentStats() MonthlyStats {
+	if s == nil {
+		log.Printf("ERROR: Storage is nil in GetCurrentStats")
+		return *NewMonthlyStats()
+	}
+
 	month := getCurrentMonth()
 	
 	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	stats, exists := s.stats[month]
+	s.mutex.RUnlock()
 
-	if stats, exists := s.stats[month]; exists {
-		// Ensure maps are initialized
-		if stats.UniqueVisitors == nil {
-			stats.UniqueVisitors = make(map[string]time.Time)
-		}
-		if stats.PopularUrls == nil {
-			stats.PopularUrls = make(map[string]int)
-		}
-		return *stats
+	if !exists {
+		return *NewMonthlyStats()
 	}
-	return MonthlyStats{
-		UniqueVisitors: make(map[string]time.Time),
-		PopularUrls:    make(map[string]int),
+
+	// Make a copy under a short-lived read lock
+	s.mutex.RLock()
+	statsCopy := MonthlyStats{
+		AnalysisCacheHits:   stats.AnalysisCacheHits,
+		AnalysisCacheMisses: stats.AnalysisCacheMisses,
+		LinkCacheHits:       stats.LinkCacheHits,
+		LinkCacheMisses:     stats.LinkCacheMisses,
+		AnalysisRequests:    stats.AnalysisRequests,
+		ErrorCount:          stats.ErrorCount,
+		TotalLoadTime:       stats.TotalLoadTime,
+		TotalRequests:       stats.TotalRequests,
+		LastUpdated:         stats.LastUpdated,
+		UniqueVisitors:      make(map[string]time.Time, len(stats.UniqueVisitors)),
+		PopularUrls:         make(map[string]int, len(stats.PopularUrls)),
 	}
+	s.mutex.RUnlock()
+
+	// Copy maps under separate short-lived locks to minimize contention
+	s.mutex.RLock()
+	for k, v := range stats.UniqueVisitors {
+		statsCopy.UniqueVisitors[k] = v
+	}
+	s.mutex.RUnlock()
+
+	s.mutex.RLock()
+	for k, v := range stats.PopularUrls {
+		statsCopy.PopularUrls[k] = v
+	}
+	s.mutex.RUnlock()
+
+	return statsCopy
 }
 
 // Cleanup removes statistics older than the specified number of months
