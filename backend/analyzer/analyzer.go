@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/seo-optimizer/backend/stats"
 )
 
 // Object pools for frequently allocated objects
@@ -77,14 +79,11 @@ type Analyzer struct {
 	linkCache         map[string]linkCacheEntry
 	linkCacheMutex    sync.RWMutex
 	linkCacheTTL      time.Duration
-	analysisCacheHits int
-	linkCacheHits     int
-	analysisCacheMisses int
-	linkCacheMisses     int
-	maxCacheSize        int
-	maxLinkCacheSize    int
-	lastCleanup         time.Time
-	cleanupInterval     time.Duration
+	maxCacheSize      int
+	maxLinkCacheSize  int
+	lastCleanup       time.Time
+	cleanupInterval   time.Duration
+	stats             *stats.Storage
 }
 
 // Link cache entry
@@ -94,7 +93,7 @@ type linkCacheEntry struct {
 }
 
 // New creates a new Analyzer instance
-func New() *Analyzer {
+func New(dataDir string) (*Analyzer, error) {
 	// Create an optimized HTTP client with:
 	// - Reasonable timeout
 	// - Connection pooling
@@ -105,6 +104,12 @@ func New() *Analyzer {
 		IdleConnTimeout:     90 * time.Second, // Default is 90s
 		TLSHandshakeTimeout: 10 * time.Second, // Default is 10s
 		DisableCompression:  false,            // Enable compression
+	}
+	
+	// Initialize statistics storage
+	statsStorage, err := stats.NewStorage(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize stats storage: %w", err)
 	}
 	
 	analyzer := &Analyzer{
@@ -120,12 +125,13 @@ func New() *Analyzer {
 		maxLinkCacheSize: 10000,            // Maximum number of cached link statuses
 		cleanupInterval:  5 * time.Minute,  // Run cleanup every 5 minutes
 		lastCleanup:      time.Now(),
+		stats:            statsStorage,
 	}
 	
 	// Start cleanup goroutine
 	go analyzer.periodicCleanup()
 	
-	return analyzer
+	return analyzer, nil
 }
 
 // periodicCleanup removes expired entries from both caches periodically
@@ -253,27 +259,25 @@ func generateCacheKey(url string) string {
 
 // GetCacheStats returns statistics about the cache
 func (a *Analyzer) GetCacheStats() CacheStats {
+	currentStats := a.stats.GetCurrentStats()
+	
 	a.cacheMutex.RLock()
 	analysisEntries := len(a.cache)
 	analysisTTL := a.cacheTTL
-	analysisHits := a.analysisCacheHits
-	analysisMisses := a.analysisCacheMisses
 	a.cacheMutex.RUnlock()
 	
 	a.linkCacheMutex.RLock()
 	linkEntries := len(a.linkCache)
 	linkTTL := a.linkCacheTTL
-	linkHits := a.linkCacheHits
-	linkMisses := a.linkCacheMisses
 	a.linkCacheMutex.RUnlock()
 	
 	return CacheStats{
 		AnalysisEntries:     analysisEntries,
 		LinkEntries:         linkEntries,
-		AnalysisCacheHits:   analysisHits,
-		LinkCacheHits:       linkHits,
-		AnalysisCacheMisses: analysisMisses,
-		LinkCacheMisses:     linkMisses,
+		AnalysisCacheHits:   currentStats.AnalysisCacheHits,
+		LinkCacheHits:       currentStats.LinkCacheHits,
+		AnalysisCacheMisses: currentStats.AnalysisCacheMisses,
+		LinkCacheMisses:     currentStats.LinkCacheMisses,
 		AnalysisCacheTTL:    analysisTTL,
 		LinkCacheTTL:        linkTTL,
 	}
@@ -308,7 +312,7 @@ func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
 	a.cacheMutex.RLock()
 	if entry, found := a.cache[cacheKey]; found {
 		if time.Since(entry.timestamp) < a.cacheTTL {
-			a.analysisCacheHits++
+			a.stats.IncrementStats(1, 0, 0, 0) // Increment analysis cache hits
 			a.cacheMutex.RUnlock()
 			return entry.analysis, nil
 		}
@@ -316,7 +320,7 @@ func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
 	a.cacheMutex.RUnlock()
 	
 	// Not in cache or expired
-	a.analysisCacheMisses++
+	a.stats.IncrementStats(0, 1, 0, 0) // Increment analysis cache misses
 	
 	// Perform analysis
 	analysis, err := a.AnalyzeWithContext(ctx, url)
@@ -750,7 +754,7 @@ func (a *Analyzer) isLinkAccessibleWithContext(ctx context.Context, url string) 
 	a.linkCacheMutex.RLock()
 	if entry, found := a.linkCache[cacheKey]; found {
 		if time.Since(entry.timestamp) < a.linkCacheTTL {
-			a.linkCacheHits++
+			a.stats.IncrementStats(0, 0, 1, 0) // Increment link cache hits
 			a.linkCacheMutex.RUnlock()
 			return entry.accessible
 		}
@@ -758,7 +762,7 @@ func (a *Analyzer) isLinkAccessibleWithContext(ctx context.Context, url string) 
 	a.linkCacheMutex.RUnlock()
 	
 	// Not in cache or expired
-	a.linkCacheMisses++
+	a.stats.IncrementStats(0, 0, 0, 1) // Increment link cache misses
 	
 	// Create a request with context
 	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
@@ -918,4 +922,9 @@ func (a *Analyzer) generateRecommendations(analysis *SEOAnalysis) []string {
 	}
 
 	return recommendations
+}
+
+// GetStats returns the statistics storage instance
+func (a *Analyzer) GetStats() *stats.Storage {
+	return a.stats
 }

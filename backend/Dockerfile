@@ -35,7 +35,11 @@ WORKDIR /app
 
 # Create data directory with proper permissions
 RUN mkdir -p /app/data && \
+    chown nobody:nobody /app/data && \
     chmod 777 /app/data
+
+# Declare volume for persistent storage
+VOLUME /app/data
 
 # Copy binary from builder
 COPY --from=builder /app/main .
@@ -46,7 +50,11 @@ EXPOSE 8082
 # Set environment variables with defaults
 ENV PORT=8082 \
     DEV_MODE=false \
-    GIN_MODE=release
+    GIN_MODE=release \
+    DATA_DIR=/app/data
+
+# Switch to non-root user
+USER nobody
 
 # Run the binary
 CMD ["./main"] 

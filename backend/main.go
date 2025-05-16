@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -87,6 +88,68 @@ func getRateLimitConfig() (int, int) {
 	return requests, duration
 }
 
+func initializeAnalyzer() (*analyzer.Analyzer, error) {
+	// Get data directory from environment variable
+	dataDir := os.Getenv("DATA_DIR")
+	
+	// If not set, use different defaults for development and production
+	if dataDir == "" {
+		if os.Getenv("GIN_MODE") == "release" {
+			dataDir = "/app/data" // Docker volume path for production
+		} else {
+			// For local development, use a directory in the project
+			dataDir = "data"
+		}
+	}
+
+	// Create data directory if it doesn't exist
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to initialize stats storage: %w", err)
+	}
+
+	// Log the data directory being used
+	log.Printf("Using data directory: %s", dataDir)
+
+	// Create analyzer instance
+	analyzerInstance, err := analyzer.New(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Start periodic cleanup in background
+	go func() {
+		// Calculate duration until next midnight
+		now := time.Now()
+		nextMidnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		duration := nextMidnight.Sub(now)
+
+		// Wait until first midnight
+		time.Sleep(duration)
+
+		// Then run daily at midnight
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+
+		cleanup := func() {
+			if stats := analyzerInstance.GetStats(); stats != nil {
+				// Keep only current month and previous month
+				stats.Cleanup(1) // 1 means keep current month plus 1 previous month
+				log.Printf("Statistics cleanup completed at %v", time.Now().Format("2006-01-02 15:04:05"))
+			}
+		}
+
+		// Run cleanup immediately after midnight
+		cleanup()
+
+		// Then run every 24 hours
+		for range ticker.C {
+			cleanup()
+		}
+	}()
+
+	return analyzerInstance, nil
+}
+
 func main() {
 	// Load environment configuration
 	loadEnv()
@@ -95,7 +158,12 @@ func main() {
 	setupGinMode()
 
 	// Initialize services
-	seoAnalyzer = analyzer.New()
+	var err error
+	seoAnalyzer, err = initializeAnalyzer()
+	if err != nil {
+		log.Fatalf("Failed to initialize analyzer: %v", err)
+	}
+
 	requests, duration := getRateLimitConfig()
 	rateLimiter = middleware.NewRateLimiter(float64(requests), float64(duration * 5)) // Convert to float64
 
