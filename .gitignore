@@ -83,4 +83,17 @@ testem.log
 
 # SEO files
 frontend/public/sitemap.xml
-frontend/public/sitemap.xsl 
+frontend/public/sitemap.xsl
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo 
