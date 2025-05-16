@@ -241,27 +241,36 @@ func main() {
 			if stats := seoAnalyzer.GetStats(); stats != nil {
 				currentStats := stats.GetCurrentStats()
 				
-				// Calculate average load time
-				var avgLoadTime float64
-				if currentStats.TotalRequests > 0 {
-					avgLoadTime = currentStats.TotalLoadTime / float64(currentStats.TotalRequests)
-				}
-				
-				// Filter out /api/analyze from popularUrls if it exists
+				// Filter out /api/analyze from popularUrls and adjust counters
 				filteredUrls := make(map[string]int)
+				apiCallCount := 0
 				if currentStats.PopularUrls != nil {
 					for url, count := range currentStats.PopularUrls {
 						if url != "/api/analyze" {
 							filteredUrls[url] = count
+						} else {
+							apiCallCount = count
 						}
 					}
+				}
+
+				// Adjust total requests to exclude API calls
+				adjustedRequests := currentStats.TotalRequests - apiCallCount
+				if adjustedRequests < 0 {
+					adjustedRequests = 0
+				}
+				
+				// Calculate average load time based on actual analyses
+				var avgLoadTime float64
+				if adjustedRequests > 0 {
+					avgLoadTime = currentStats.TotalLoadTime / float64(adjustedRequests)
 				}
 				
 				// Prepare response based on mode
 				response := gin.H{
 					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
-					"totalRequests":     currentStats.TotalRequests,
-					"errorRate":         float64(currentStats.ErrorCount) / float64(currentStats.TotalRequests+1) * 100,
+					"totalRequests":     adjustedRequests,
+					"errorRate":         float64(currentStats.ErrorCount) / float64(adjustedRequests+1) * 100,
 					"averageLoadTime":   avgLoadTime,
 				}
 				
@@ -344,10 +353,14 @@ func analyzeURL(c *gin.Context) {
 		return
 	}
 
-	// Always track the analysis, but keep the timing data
+	// Track the actual analyzed URL, not the API endpoint
 	loadTime := float64(time.Since(start).Milliseconds())
 	if stats := seoAnalyzer.GetStats(); stats != nil {
-		stats.TrackAnalysis(request.URL, loadTime, false)
+		// Only track if it's a valid URL
+		if request.URL != "" && request.URL != "/api/analyze" {
+			stats.TrackAnalysis(request.URL, loadTime, false)
+			log.Printf("Tracked analysis for URL: %s", request.URL)
+		}
 	}
 
 	c.JSON(http.StatusOK, analysis)
