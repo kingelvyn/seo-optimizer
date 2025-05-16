@@ -9,7 +9,7 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install
 
-# Copy source code
+# Copy source code and public files
 COPY . .
 
 # Build the app
@@ -25,6 +25,9 @@ RUN npm install -g serve
 
 # Copy built assets from build stage
 COPY --from=build /app/build ./build
+
+# Create directory for dynamic files
+RUN mkdir -p /app/build/dynamic
 
 # Expose port 3000
 EXPOSE 3000

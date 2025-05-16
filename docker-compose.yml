@@ -16,6 +16,15 @@ services:
       - REACT_APP_API_URL=/api
     security_opt:
       - no-new-privileges:true
+    volumes:
+      - /opt/seo-optimizer/private/sitemap.xml:/app/build/dynamic/sitemap.xml:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`seo-optimizer.elvynprise.xyz`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.redirect-sitemap.redirectregex.regex=^https://seo-optimizer\\.elvynprise\\.xyz/sitemap\\.xml$$"
+      - "traefik.http.middlewares.redirect-sitemap.redirectregex.replacement=https://seo-optimizer.elvynprise.xyz/dynamic/sitemap.xml"
+      - "traefik.http.routers.frontend.middlewares=redirect-sitemap"
 
   backend:
     build:

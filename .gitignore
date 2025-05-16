@@ -74,4 +74,8 @@ libpeerconnection.log
 testem.log
 /typings/
 *.pem
-.eslintcache 
+.eslintcache
+
+# Private files
+/opt/seo-optimizer/private/
+**/sitemap.xml 
