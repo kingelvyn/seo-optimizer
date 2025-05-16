@@ -433,7 +433,7 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>SEO Optimizer</h1>
+        <h1>SEO Optimizer - Website Analysis Tool</h1>
         <div className="analysis-form">
           <input
             type="url"
