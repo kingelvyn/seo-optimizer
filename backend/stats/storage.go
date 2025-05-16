@@ -47,6 +47,7 @@ type Storage struct {
 	filePath    string
 	lastWrite   time.Time
 	writeBuffer chan struct{}
+	done        chan struct{} // Channel to signal shutdown
 }
 
 // NewStorage creates a new statistics storage instance
@@ -63,6 +64,7 @@ func NewStorage(dataDir string) (*Storage, error) {
 		stats:       make(map[string]*MonthlyStats),
 		filePath:    filePath,
 		writeBuffer: make(chan struct{}, 1),
+		done:        make(chan struct{}),
 	}
 
 	// Initialize current month's stats
@@ -422,7 +424,7 @@ func (s *Storage) save() error {
 
 // backgroundWriter handles periodic writes to disk
 func (s *Storage) backgroundWriter() {
-	ticker := time.NewTicker(1 * time.Minute) // More frequent saves
+	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -437,6 +439,13 @@ func (s *Storage) backgroundWriter() {
 			if err := s.save(); err != nil {
 				log.Printf("Error during periodic stats write: %v", err)
 			}
+		case <-s.done:
+			// Final write before shutdown
+			log.Printf("Performing final stats write before shutdown")
+			if err := s.save(); err != nil {
+				log.Printf("Error during final stats write: %v", err)
+			}
+			return
 		}
 	}
 }
@@ -448,7 +457,7 @@ func getCurrentMonth() string {
 
 // requestWrite signals that a write to disk is needed
 func (s *Storage) requestWrite() {
-	// Try to write immediately
+	// Try to write immediately first
 	if err := s.save(); err != nil {
 		log.Printf("Error during direct stats write: %v", err)
 		// Fall back to buffered write if immediate write fails
@@ -456,7 +465,10 @@ func (s *Storage) requestWrite() {
 		case s.writeBuffer <- struct{}{}:
 			log.Printf("Queued stats write after failed direct write")
 		default:
-			log.Printf("Write buffer full, write already pending")
+			// Try an immediate write again if buffer is full
+			if err := s.save(); err != nil {
+				log.Printf("Error during retry stats write: %v", err)
+			}
 		}
 	}
 }
@@ -608,4 +620,24 @@ func (s *Storage) GetAllMonths() []string {
 	sort.Sort(sort.Reverse(sort.StringSlice(months)))
 	
 	return months
+}
+
+// Shutdown ensures all statistics are written before the application exits
+func (s *Storage) Shutdown() error {
+	if s == nil {
+		return nil
+	}
+
+	log.Printf("Shutting down statistics storage")
+	
+	// Signal the background writer to stop and perform final write
+	close(s.done)
+
+	// Perform one final write directly
+	if err := s.save(); err != nil {
+		return fmt.Errorf("failed to save stats during shutdown: %w", err)
+	}
+
+	log.Printf("Statistics storage shutdown complete")
+	return nil
 } 

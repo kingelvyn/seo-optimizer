@@ -928,3 +928,28 @@ func (a *Analyzer) generateRecommendations(analysis *SEOAnalysis) []string {
 func (a *Analyzer) GetStats() *stats.Storage {
 	return a.stats
 }
+
+// Shutdown performs cleanup and ensures all statistics are saved
+func (a *Analyzer) Shutdown() error {
+	if a == nil {
+		return nil
+	}
+
+	// Stop the cleanup goroutine by closing a channel
+	if a.stats != nil {
+		if err := a.stats.Shutdown(); err != nil {
+			return fmt.Errorf("failed to shutdown stats storage: %w", err)
+		}
+	}
+
+	// Clear caches
+	a.cacheMutex.Lock()
+	a.cache = nil
+	a.cacheMutex.Unlock()
+
+	a.linkCacheMutex.Lock()
+	a.linkCache = nil
+	a.linkCacheMutex.Unlock()
+
+	return nil
+}

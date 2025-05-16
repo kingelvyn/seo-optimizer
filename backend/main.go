@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -200,7 +203,6 @@ func main() {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
-
 		c.Next()
 	})
 
@@ -281,10 +283,42 @@ func main() {
 		port = "8082" // Default port
 	}
 
-	log.Printf("Server starting on http://localhost:%s\n", port)
-	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server:", err)
+	// Create a server with graceful shutdown timeout
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: r,
 	}
+
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Server starting on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	// Create a deadline for graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Shutdown the server
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	// Shutdown the analyzer (which will save stats)
+	if err := seoAnalyzer.Shutdown(); err != nil {
+		log.Printf("Error during analyzer shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }
 
 func analyzeURL(c *gin.Context) {
