@@ -55,13 +55,23 @@ func NewStorage(dataDir string) (*Storage, error) {
 	}
 
 	// Load existing stats if file exists
-	if err := s.load(); err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to load stats: %w", err)
+	if err := s.load(); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("failed to load stats: %w", err)
+		}
+		log.Printf("No existing stats file found, starting fresh")
+	} else {
+		log.Printf("Successfully loaded existing stats")
 	}
 
 	// Try to migrate old statistics
 	if err := s.migrateOldStats(dataDir); err != nil {
 		log.Printf("Warning: Failed to migrate old statistics: %v", err)
+	}
+
+	// Force an immediate save to ensure everything is written
+	if err := s.save(); err != nil {
+		log.Printf("Warning: Failed to perform initial stats save: %v", err)
 	}
 
 	// Start background writer
@@ -216,6 +226,8 @@ func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
 	stats.PopularUrls[url]++
 	stats.LastUpdated = time.Now()
 
+	log.Printf("Updated stats after analysis: %+v", stats)
+
 	if time.Since(s.lastWrite) > time.Minute {
 		s.requestWrite()
 		s.lastWrite = time.Now()
@@ -226,8 +238,11 @@ func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
 func (s *Storage) load() error {
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
+		log.Printf("Error reading stats file: %v", err)
 		return err
 	}
+
+	log.Printf("Loading stats from file: %s", string(data))
 
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -235,8 +250,11 @@ func (s *Storage) load() error {
 	// Create temporary map for loading
 	tempStats := make(map[string]*MonthlyStats)
 	if err := json.Unmarshal(data, &tempStats); err != nil {
+		log.Printf("Error unmarshaling stats: %v", err)
 		return err
 	}
+
+	log.Printf("Loaded stats before initialization: %+v", tempStats)
 
 	// Ensure all maps are properly initialized
 	for month, stats := range tempStats {
@@ -247,8 +265,12 @@ func (s *Storage) load() error {
 			stats.PopularUrls = make(map[string]int)
 		}
 
+		log.Printf("Processing month %s, stats before merge: %+v", month, stats)
+
 		// Preserve any existing data by merging
 		if existingStats, exists := s.stats[month]; exists {
+			log.Printf("Found existing stats for month %s: %+v", month, existingStats)
+			
 			// Merge unique visitors
 			for ip, timestamp := range existingStats.UniqueVisitors {
 				if _, ok := stats.UniqueVisitors[ip]; !ok {
@@ -273,11 +295,14 @@ func (s *Storage) load() error {
 			if existingStats.LastUpdated.After(stats.LastUpdated) {
 				stats.LastUpdated = existingStats.LastUpdated
 			}
+
+			log.Printf("Stats after merge for month %s: %+v", month, stats)
 		}
 	}
 
 	// Replace the storage's stats with the merged data
 	s.stats = tempStats
+	log.Printf("Final loaded stats: %+v", s.stats)
 	return nil
 }
 
@@ -288,37 +313,47 @@ func (s *Storage) save() error {
 	s.mutex.RUnlock()
 
 	if err != nil {
+		log.Printf("Error marshaling stats: %v", err)
 		return fmt.Errorf("failed to marshal stats: %w", err)
 	}
+
+	log.Printf("Writing stats to file: %s", string(data))
 
 	// Write to temporary file first
 	tempFile := s.filePath + ".tmp"
 	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		log.Printf("Error writing temp file: %v", err)
 		return fmt.Errorf("failed to write temporary file: %w", err)
 	}
 
 	// Rename temporary file to actual file (atomic operation)
 	if err := os.Rename(tempFile, s.filePath); err != nil {
 		os.Remove(tempFile) // Clean up temp file if rename fails
+		log.Printf("Error renaming temp file: %v", err)
 		return fmt.Errorf("failed to rename temporary file: %w", err)
 	}
 
+	log.Printf("Successfully saved stats to %s", s.filePath)
 	return nil
 }
 
 // backgroundWriter handles periodic writes to disk
 func (s *Storage) backgroundWriter() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute) // More frequent saves
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-s.writeBuffer:
 			// Immediate write requested
-			s.save()
+			if err := s.save(); err != nil {
+				log.Printf("Error during immediate stats write: %v", err)
+			}
 		case <-ticker.C:
 			// Periodic write
-			s.save()
+			if err := s.save(); err != nil {
+				log.Printf("Error during periodic stats write: %v", err)
+			}
 		}
 	}
 }
@@ -330,11 +365,16 @@ func getCurrentMonth() string {
 
 // requestWrite signals that a write to disk is needed
 func (s *Storage) requestWrite() {
-	select {
-	case s.writeBuffer <- struct{}{}:
-		// Write requested
-	default:
-		// Buffer full, write already pending
+	// Try to write immediately
+	if err := s.save(); err != nil {
+		log.Printf("Error during direct stats write: %v", err)
+		// Fall back to buffered write if immediate write fails
+		select {
+		case s.writeBuffer <- struct{}{}:
+			log.Printf("Queued stats write after failed direct write")
+		default:
+			log.Printf("Write buffer full, write already pending")
+		}
 	}
 }
 
@@ -352,14 +392,6 @@ func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMis
 			PopularUrls:    make(map[string]int),
 		}
 		s.stats[month] = stats
-	} else {
-		// Ensure maps are initialized
-		if stats.UniqueVisitors == nil {
-			stats.UniqueVisitors = make(map[string]time.Time)
-		}
-		if stats.PopularUrls == nil {
-			stats.PopularUrls = make(map[string]int)
-		}
 	}
 
 	stats.AnalysisCacheHits += analysisHits
@@ -367,6 +399,8 @@ func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMis
 	stats.LinkCacheHits += linkHits
 	stats.LinkCacheMisses += linkMisses
 	stats.LastUpdated = time.Now()
+
+	log.Printf("Updated stats after increment: %+v", stats)
 
 	// Request a write if enough time has passed
 	if time.Since(s.lastWrite) > time.Minute {
