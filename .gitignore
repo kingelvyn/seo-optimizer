@@ -78,4 +78,9 @@ testem.log
 
 # Private files
 /opt/seo-optimizer/private/
-**/sitemap.xml 
+**/sitemap.xml
+**/sitemap.xsl
+
+# SEO files
+frontend/public/sitemap.xml
+frontend/public/sitemap.xsl 
