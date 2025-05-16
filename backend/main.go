@@ -266,7 +266,7 @@ func main() {
 					avgLoadTime = currentStats.TotalLoadTime / float64(adjustedRequests)
 				}
 				
-				// Prepare response based on mode
+				// Prepare response with all numerical stats
 				response := gin.H{
 					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
 					"totalRequests":     adjustedRequests,
@@ -274,7 +274,7 @@ func main() {
 					"averageLoadTime":   avgLoadTime,
 				}
 				
-				// Include filtered popular URLs only in development mode
+				// Include popular URLs only in development mode
 				if os.Getenv("GIN_MODE") != "release" {
 					response["popularUrls"] = filteredUrls
 				}
