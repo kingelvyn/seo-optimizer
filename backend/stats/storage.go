@@ -88,7 +88,13 @@ func (s *Storage) migrateOldStats(dataDir string) error {
 		ErrorCount       int                  `json:"errorCount"`
 		PopularUrls      map[string]int       `json:"popularUrls"`
 		AverageLoadTime  float64              `json:"averageLoadTime"`
+		TotalRequests    int                  `json:"totalRequests"`
 		LastPersisted    time.Time            `json:"lastPersisted"`
+		// Add cache-related fields
+		AnalysisCacheHits   int `json:"analysisCacheHits"`
+		AnalysisCacheMisses int `json:"analysisCacheMisses"`
+		LinkCacheHits       int `json:"linkCacheHits"`
+		LinkCacheMisses     int `json:"linkCacheMisses"`
 	}
 
 	if err := json.Unmarshal(data, &oldStats); err != nil {
@@ -125,18 +131,32 @@ func (s *Storage) migrateOldStats(dataDir string) error {
 		}
 	}
 
-	// Migrate data
+	// Migrate data - preserve existing values if they exist
 	for ip, timestamp := range oldStats.UniqueVisitors {
-		stats.UniqueVisitors[ip] = timestamp
+		if _, exists := stats.UniqueVisitors[ip]; !exists {
+			stats.UniqueVisitors[ip] = timestamp
+		}
 	}
 	for url, count := range oldStats.PopularUrls {
-		stats.PopularUrls[url] = count
+		stats.PopularUrls[url] += count // Add to existing count if any
 	}
-	stats.AnalysisRequests = oldStats.AnalysisRequests
-	stats.ErrorCount = oldStats.ErrorCount
-	stats.TotalLoadTime = oldStats.AverageLoadTime * float64(oldStats.AnalysisRequests)
-	stats.TotalRequests = oldStats.AnalysisRequests
-	stats.LastUpdated = oldStats.LastPersisted
+	
+	// Preserve existing counters by adding old values
+	stats.AnalysisRequests += oldStats.AnalysisRequests
+	stats.ErrorCount += oldStats.ErrorCount
+	stats.TotalLoadTime += oldStats.AverageLoadTime * float64(oldStats.TotalRequests)
+	stats.TotalRequests += oldStats.TotalRequests
+	
+	// Preserve cache statistics
+	stats.AnalysisCacheHits += oldStats.AnalysisCacheHits
+	stats.AnalysisCacheMisses += oldStats.AnalysisCacheMisses
+	stats.LinkCacheHits += oldStats.LinkCacheHits
+	stats.LinkCacheMisses += oldStats.LinkCacheMisses
+
+	// Update last updated timestamp if needed
+	if oldStats.LastPersisted.After(stats.LastUpdated) {
+		stats.LastUpdated = oldStats.LastPersisted
+	}
 
 	// Request immediate write of migrated data
 	s.requestWrite()
@@ -212,7 +232,53 @@ func (s *Storage) load() error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return json.Unmarshal(data, &s.stats)
+	// Create temporary map for loading
+	tempStats := make(map[string]*MonthlyStats)
+	if err := json.Unmarshal(data, &tempStats); err != nil {
+		return err
+	}
+
+	// Ensure all maps are properly initialized
+	for month, stats := range tempStats {
+		if stats.UniqueVisitors == nil {
+			stats.UniqueVisitors = make(map[string]time.Time)
+		}
+		if stats.PopularUrls == nil {
+			stats.PopularUrls = make(map[string]int)
+		}
+
+		// Preserve any existing data by merging
+		if existingStats, exists := s.stats[month]; exists {
+			// Merge unique visitors
+			for ip, timestamp := range existingStats.UniqueVisitors {
+				if _, ok := stats.UniqueVisitors[ip]; !ok {
+					stats.UniqueVisitors[ip] = timestamp
+				}
+			}
+			// Merge popular URLs
+			for url, count := range existingStats.PopularUrls {
+				stats.PopularUrls[url] += count
+			}
+			// Add counters
+			stats.AnalysisRequests += existingStats.AnalysisRequests
+			stats.ErrorCount += existingStats.ErrorCount
+			stats.TotalLoadTime += existingStats.TotalLoadTime
+			stats.TotalRequests += existingStats.TotalRequests
+			stats.AnalysisCacheHits += existingStats.AnalysisCacheHits
+			stats.AnalysisCacheMisses += existingStats.AnalysisCacheMisses
+			stats.LinkCacheHits += existingStats.LinkCacheHits
+			stats.LinkCacheMisses += existingStats.LinkCacheMisses
+
+			// Keep the most recent last updated time
+			if existingStats.LastUpdated.After(stats.LastUpdated) {
+				stats.LastUpdated = existingStats.LastUpdated
+			}
+		}
+	}
+
+	// Replace the storage's stats with the merged data
+	s.stats = tempStats
+	return nil
 }
 
 // save writes statistics to file
