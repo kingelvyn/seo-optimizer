@@ -344,12 +344,10 @@ func analyzeURL(c *gin.Context) {
 		return
 	}
 
-	// Track the analysis if requested (in development mode)
-	if request.Track {
-		loadTime := float64(time.Since(start).Milliseconds())
-		if stats := seoAnalyzer.GetStats(); stats != nil {
-			stats.TrackAnalysis(request.URL, loadTime, false)
-		}
+	// Always track the analysis, but keep timing data
+	loadTime := float64(time.Since(start).Milliseconds())
+	if stats := seoAnalyzer.GetStats(); stats != nil {
+		stats.TrackAnalysis(request.URL, loadTime, false)
 	}
 
 	c.JSON(http.StatusOK, analysis)

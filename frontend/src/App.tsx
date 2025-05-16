@@ -158,10 +158,7 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          url,
-          track: process.env.NODE_ENV === 'development' // Only track in development mode
-        }),
+        body: JSON.stringify({ url }),
       });
 
       if (!response.ok) {
