@@ -1,54 +1,230 @@
 package analyzer
 
 import (
+	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
+// Cache entry with expiration
+type cacheEntry struct {
+	analysis  *SEOAnalysis
+	timestamp time.Time
+}
+
+// CacheStats provides statistics about the analyzer's cache
+type CacheStats struct {
+	AnalysisEntries     int           `json:"analysisEntries"`
+	LinkEntries         int           `json:"linkEntries"`
+	AnalysisCacheHits   int           `json:"analysisCacheHits"`
+	LinkCacheHits       int           `json:"linkCacheHits"`
+	AnalysisCacheMisses int           `json:"analysisCacheMisses"`
+	LinkCacheMisses     int           `json:"linkCacheMisses"`
+	AnalysisCacheTTL    time.Duration `json:"analysisCacheTTL"`
+	LinkCacheTTL        time.Duration `json:"linkCacheTTL"`
+}
+
 // Analyzer performs SEO analysis on a given URL
 type Analyzer struct {
-	client *http.Client
+	client            *http.Client
+	cache             map[string]cacheEntry
+	cacheMutex        sync.RWMutex
+	cacheTTL          time.Duration
+	linkCache         map[string]linkCacheEntry
+	linkCacheMutex    sync.RWMutex
+	linkCacheTTL      time.Duration
+	analysisCacheHits int
+	linkCacheHits     int
+	analysisCacheMisses int
+	linkCacheMisses     int
+}
+
+// Link cache entry
+type linkCacheEntry struct {
+	accessible bool
+	timestamp  time.Time
 }
 
 // New creates a new Analyzer instance
 func New() *Analyzer {
+	// Create an optimized HTTP client with:
+	// - Reasonable timeout
+	// - Connection pooling
+	// - Keep-alive connections
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // Increase from default 2
+		MaxIdleConnsPerHost: 10,               // Increase from default 2
+		IdleConnTimeout:     90 * time.Second, // Default is 90s
+		TLSHandshakeTimeout: 10 * time.Second, // Default is 10s
+		DisableCompression:  false,            // Enable compression
+	}
+	
 	return &Analyzer{
 		client: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   15 * time.Second,
+			Transport: transport,
 		},
+		cache:        make(map[string]cacheEntry),
+		cacheTTL:     30 * time.Minute, // Cache results for 30 minutes
+		linkCache:    make(map[string]linkCacheEntry),
+		linkCacheTTL: 10 * time.Minute, // Cache link status for 10 minutes
 	}
+}
+
+// SetCacheTTL sets the cache TTL
+func (a *Analyzer) SetCacheTTL(ttl time.Duration) {
+	a.cacheMutex.Lock()
+	defer a.cacheMutex.Unlock()
+	a.cacheTTL = ttl
+}
+
+// ClearCache clears the analysis cache
+func (a *Analyzer) ClearCache() {
+	a.cacheMutex.Lock()
+	defer a.cacheMutex.Unlock()
+	a.cache = make(map[string]cacheEntry)
+}
+
+// generateCacheKey creates a unique key for the URL
+func generateCacheKey(url string) string {
+	hash := md5.Sum([]byte(url))
+	return hex.EncodeToString(hash[:])
+}
+
+// GetCacheStats returns statistics about the cache
+func (a *Analyzer) GetCacheStats() CacheStats {
+	a.cacheMutex.RLock()
+	analysisEntries := len(a.cache)
+	analysisTTL := a.cacheTTL
+	analysisHits := a.analysisCacheHits
+	analysisMisses := a.analysisCacheMisses
+	a.cacheMutex.RUnlock()
+	
+	a.linkCacheMutex.RLock()
+	linkEntries := len(a.linkCache)
+	linkTTL := a.linkCacheTTL
+	linkHits := a.linkCacheHits
+	linkMisses := a.linkCacheMisses
+	a.linkCacheMutex.RUnlock()
+	
+	return CacheStats{
+		AnalysisEntries:     analysisEntries,
+		LinkEntries:         linkEntries,
+		AnalysisCacheHits:   analysisHits,
+		LinkCacheHits:       linkHits,
+		AnalysisCacheMisses: analysisMisses,
+		LinkCacheMisses:     linkMisses,
+		AnalysisCacheTTL:    analysisTTL,
+		LinkCacheTTL:        linkTTL,
+	}
+}
+
+// IsCached checks if a URL is in the cache and not expired
+func (a *Analyzer) IsCached(url string) bool {
+	cacheKey := generateCacheKey(url)
+	a.cacheMutex.RLock()
+	defer a.cacheMutex.RUnlock()
+	
+	entry, found := a.cache[cacheKey]
+	if found && time.Since(entry.timestamp) < a.cacheTTL {
+		return true
+	}
+	return false
 }
 
 // Analyze performs a complete SEO analysis of the given URL
 func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
+	// Create a context with timeout for the entire analysis process
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	// Check cache first
+	cacheKey := generateCacheKey(url)
+	a.cacheMutex.RLock()
+	if entry, found := a.cache[cacheKey]; found {
+		if time.Since(entry.timestamp) < a.cacheTTL {
+			a.analysisCacheHits++
+			a.cacheMutex.RUnlock()
+			return entry.analysis, nil
+		}
+	}
+	a.cacheMutex.RUnlock()
+	
+	// Not in cache or expired
+	a.analysisCacheMisses++
+	
+	// Perform analysis
+	analysis, err := a.AnalyzeWithContext(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Store in cache
+	a.cacheMutex.Lock()
+	a.cache[cacheKey] = cacheEntry{
+		analysis:  analysis,
+		timestamp: time.Now(),
+	}
+	a.cacheMutex.Unlock()
+	
+	return analysis, nil
+}
+
+// AnalyzeWithContext performs a complete SEO analysis of the given URL with context
+func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnalysis, error) {
 	startTime := time.Now()
 
+	// Create a request with context
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Set user agent to avoid being blocked by some websites
+	req.Header.Set("User-Agent", "SEOAnalyzer/1.0")
+
 	// Fetch the page
-	resp, err := a.client.Get(url)
+	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	// Read the body
-	body, err := io.ReadAll(resp.Body)
+	// Get actual page size from response headers if available
+	pageSize := 0
+	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+		if size, err := strconv.Atoi(contentLength); err == nil {
+			pageSize = size
+		}
+	}
+
+	// Read the entire body into a buffer
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	
+	// If we couldn't get the page size from headers, calculate it from the response
+	if pageSize == 0 {
+		pageSize = len(bodyBytes)
+	}
+	
+	// Parse the HTML from the buffer
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(bodyBytes)))
 	if err != nil {
 		return nil, err
 	}
 
 	// Calculate load time before any processing
 	loadTime := time.Since(startTime)
-
-	// Parse the HTML
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
 
 	// Check mobile optimization
 	mobileOptimized := false
@@ -59,15 +235,7 @@ func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
 		}
 	})
 
-	// Get actual page size from response headers if available
-	pageSize := len(body)
-	if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
-		if size, err := strconv.Atoi(contentLength); err == nil {
-			pageSize = size
-		}
-	}
-
-	// Perform analysis
+	// Perform analysis with context awareness
 	analysis := &SEOAnalysis{
 		URL:         url,
 		Title:       a.analyzeTitleTag(doc),
@@ -75,7 +243,7 @@ func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
 		Headers:     a.analyzeHeaders(doc),
 		Content:     a.analyzeContent(doc),
 		Performance: a.analyzePerformance(pageSize, loadTime, mobileOptimized),
-		Links:       a.analyzeLinks(doc, url),
+		Links:       a.analyzeLinksWithContext(ctx, doc, url),
 	}
 
 	// Calculate overall score and recommendations
@@ -276,10 +444,13 @@ func (a *Analyzer) analyzePerformance(pageSize int, loadTime time.Duration, mobi
 	return perf
 }
 
-func (a *Analyzer) analyzeLinks(doc *goquery.Document, baseURL string) LinkAnalysis {
+// analyzeLinksWithContext analyzes links with context awareness
+func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Document, baseURL string) LinkAnalysis {
 	links := LinkAnalysis{}
 	checkedLinks := make(map[string]bool)
+	var linkURLs []string
 
+	// First, collect all unique links
 	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, exists := s.Attr("href")
 		if !exists || href == "" || href == "#" {
@@ -294,27 +465,70 @@ func (a *Analyzer) analyzeLinks(doc *goquery.Document, baseURL string) LinkAnaly
 			href = baseURL + href
 		}
 
-		// Skip if we've already checked this link
+		// Skip if we've already seen this link
 		if checkedLinks[href] {
 			return
 		}
 		checkedLinks[href] = true
-
+		
 		// Categorize the link
 		if strings.HasPrefix(href, baseURL) || strings.HasPrefix(href, "/") {
 			links.InternalLinks++
-			// Check if internal link is broken
-			if !a.isLinkAccessible(href) {
-				links.BrokenLinks++
-			}
+			linkURLs = append(linkURLs, href)
 		} else if strings.HasPrefix(href, "http") {
 			links.ExternalLinks++
-			// Optionally check external links (might want to limit this for performance)
-			if !a.isLinkAccessible(href) {
-				links.BrokenLinks++
-			}
+			linkURLs = append(linkURLs, href)
 		}
 	})
+	
+	// Now check all links concurrently with controlled parallelism
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 10) // Limit to 10 concurrent requests
+	var mu sync.Mutex // Mutex to protect the brokenLinks counter
+	
+	// Create a context that will be canceled when the function returns
+	linkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	
+	for _, url := range linkURLs {
+		// Check if the parent context is canceled
+		select {
+		case <-ctx.Done():
+			// Parent context canceled, stop processing
+			return links
+		default:
+			// Continue processing
+		}
+		
+		wg.Add(1)
+		go func(url string) {
+			defer wg.Done()
+			
+			semaphore <- struct{}{} // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+			
+			if !a.isLinkAccessibleWithContext(linkCtx, url) {
+				mu.Lock()
+				links.BrokenLinks++
+				mu.Unlock()
+			}
+		}(url)
+	}
+	
+	// Use a channel to signal completion or timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	
+	// Wait for completion or context cancellation
+	select {
+	case <-done:
+		// All links checked successfully
+	case <-ctx.Done():
+		// Context canceled, return what we have so far
+	}
 
 	// Score calculation - Total 100 points possible
 	score := 100
@@ -351,14 +565,69 @@ func (a *Analyzer) analyzeLinks(doc *goquery.Document, baseURL string) LinkAnaly
 	return links
 }
 
-// Helper function to check if a link is accessible
-func (a *Analyzer) isLinkAccessible(url string) bool {
-	resp, err := a.client.Head(url)
+// isLinkAccessibleWithContext checks if a link is accessible with context support
+func (a *Analyzer) isLinkAccessibleWithContext(ctx context.Context, url string) bool {
+	// Check cache first
+	cacheKey := generateCacheKey(url)
+	a.linkCacheMutex.RLock()
+	if entry, found := a.linkCache[cacheKey]; found {
+		if time.Since(entry.timestamp) < a.linkCacheTTL {
+			a.linkCacheHits++
+			a.linkCacheMutex.RUnlock()
+			return entry.accessible
+		}
+	}
+	a.linkCacheMutex.RUnlock()
+	
+	// Not in cache or expired
+	a.linkCacheMisses++
+	
+	// Create a request with context
+	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
-		return false
+		return a.cacheAndReturnLinkStatus(cacheKey, false)
+	}
+	
+	// Set user agent to avoid being blocked by some websites
+	req.Header.Set("User-Agent", "SEOAnalyzer/1.0")
+	
+	// Create a client with a shorter timeout for link checking
+	client := &http.Client{
+		Timeout: 5 * time.Second, // Shorter timeout just for link checking
+		Transport: a.client.Transport,
+	}
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return a.cacheAndReturnLinkStatus(cacheKey, false)
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode >= 200 && resp.StatusCode < 400
+	
+	accessible := resp.StatusCode >= 200 && resp.StatusCode < 400
+	return a.cacheAndReturnLinkStatus(cacheKey, accessible)
+}
+
+// cacheAndReturnLinkStatus caches the link status and returns it
+func (a *Analyzer) cacheAndReturnLinkStatus(cacheKey string, accessible bool) bool {
+	a.linkCacheMutex.Lock()
+	defer a.linkCacheMutex.Unlock()
+	
+	a.linkCache[cacheKey] = linkCacheEntry{
+		accessible: accessible,
+		timestamp:  time.Now(),
+	}
+	
+	return accessible
+}
+
+// For backward compatibility
+func (a *Analyzer) analyzeLinks(doc *goquery.Document, baseURL string) LinkAnalysis {
+	return a.analyzeLinksWithContext(context.Background(), doc, baseURL)
+}
+
+// For backward compatibility
+func (a *Analyzer) isLinkAccessible(url string) bool {
+	return a.isLinkAccessibleWithContext(context.Background(), url)
 }
 
 func (a *Analyzer) calculateOverallScore(analysis *SEOAnalysis) float64 {
@@ -456,7 +725,7 @@ func (a *Analyzer) generateRecommendations(analysis *SEOAnalysis) []string {
 	// Links recommendations
 	if analysis.Links.BrokenLinks > 0 {
 		recommendations = append(recommendations, 
-			"Fix broken links: Found " + string(analysis.Links.BrokenLinks) + " broken link(s)")
+			"Fix broken links: Found " + strconv.Itoa(analysis.Links.BrokenLinks) + " broken link(s)")
 	}
 	if analysis.Links.InternalLinks < 3 {
 		recommendations = append(recommendations, 
@@ -467,7 +736,7 @@ func (a *Analyzer) generateRecommendations(analysis *SEOAnalysis) []string {
 			"Add relevant external links to authoritative sources to improve content credibility")
 	} else if analysis.Links.ExternalLinks > 50 {
 		recommendations = append(recommendations, 
-			"Consider reducing the number of external links (current: " + string(analysis.Links.ExternalLinks) + ") to maintain focus")
+			"Consider reducing the number of external links (current: " + strconv.Itoa(analysis.Links.ExternalLinks) + ") to maintain focus")
 	}
 
 	return recommendations

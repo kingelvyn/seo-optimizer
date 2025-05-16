@@ -178,6 +178,9 @@ func main() {
 		// SEO analysis endpoints
 		api.POST("/analyze", analyzeURL)
 		
+		// Cache status endpoint
+		api.GET("/cache-status", getCacheStatus)
+		
 		// Statistics endpoint
 		api.GET("/statistics", func(c *gin.Context) {
 			c.JSON(http.StatusOK, stats.GetStatistics())
@@ -218,4 +221,24 @@ func analyzeURL(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, analysis)
+}
+
+func getCacheStatus(c *gin.Context) {
+	log.Printf("Cache status request received from: %s\n", c.ClientIP())
+	
+	// Get cache statistics
+	stats := seoAnalyzer.GetCacheStats()
+	
+	// Check if a specific URL is cached
+	url := c.Query("url")
+	isCached := false
+	if url != "" {
+		isCached = seoAnalyzer.IsCached(url)
+	}
+	
+	c.JSON(http.StatusOK, gin.H{
+		"stats": stats,
+		"url": url,
+		"isCached": isCached,
+	})
 } 
