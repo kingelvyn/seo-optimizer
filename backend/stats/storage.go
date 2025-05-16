@@ -13,11 +13,22 @@ import (
 
 // MonthlyStats represents statistics for a specific month
 type MonthlyStats struct {
-	AnalysisCacheHits   int `json:"analysis_hits"`
-	AnalysisCacheMisses int `json:"analysis_misses"`
-	LinkCacheHits       int `json:"link_hits"`
-	LinkCacheMisses     int `json:"link_misses"`
-	LastUpdated         time.Time `json:"last_updated"`
+	// Cache statistics
+	AnalysisCacheHits   int            `json:"analysis_hits"`
+	AnalysisCacheMisses int            `json:"analysis_misses"`
+	LinkCacheHits       int            `json:"link_hits"`
+	LinkCacheMisses     int            `json:"link_misses"`
+	
+	// General statistics
+	UniqueVisitors      map[string]time.Time `json:"unique_visitors"`
+	AnalysisRequests    int                  `json:"analysis_requests"`
+	ErrorCount          int                  `json:"error_count"`
+	PopularUrls         map[string]int       `json:"popular_urls"`
+	TotalLoadTime       float64              `json:"total_load_time"`
+	TotalRequests       int                  `json:"total_requests"`
+	
+	// Metadata
+	LastUpdated         time.Time            `json:"last_updated"`
 }
 
 // Storage handles persistent storage of statistics
@@ -48,10 +59,147 @@ func NewStorage(dataDir string) (*Storage, error) {
 		return nil, fmt.Errorf("failed to load stats: %w", err)
 	}
 
+	// Try to migrate old statistics
+	if err := s.migrateOldStats(dataDir); err != nil {
+		log.Printf("Warning: Failed to migrate old statistics: %v", err)
+	}
+
 	// Start background writer
 	go s.backgroundWriter()
 
 	return s, nil
+}
+
+// migrateOldStats attempts to migrate statistics from the old format
+func (s *Storage) migrateOldStats(dataDir string) error {
+	oldStatsPath := filepath.Join(dataDir, "statistics.json")
+	data, err := os.ReadFile(oldStatsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No old stats to migrate
+		}
+		return err
+	}
+
+	// Parse old statistics
+	var oldStats struct {
+		UniqueVisitors   map[string]time.Time `json:"uniqueVisitors"`
+		AnalysisRequests int                  `json:"analysisRequests"`
+		ErrorCount       int                  `json:"errorCount"`
+		PopularUrls      map[string]int       `json:"popularUrls"`
+		AverageLoadTime  float64              `json:"averageLoadTime"`
+		LastPersisted    time.Time            `json:"lastPersisted"`
+	}
+
+	if err := json.Unmarshal(data, &oldStats); err != nil {
+		return err
+	}
+
+	// Initialize maps if they're nil
+	if oldStats.UniqueVisitors == nil {
+		oldStats.UniqueVisitors = make(map[string]time.Time)
+	}
+	if oldStats.PopularUrls == nil {
+		oldStats.PopularUrls = make(map[string]int)
+	}
+
+	// Get current month's stats
+	month := getCurrentMonth()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	stats, exists := s.stats[month]
+	if !exists {
+		stats = &MonthlyStats{
+			UniqueVisitors: make(map[string]time.Time),
+			PopularUrls:    make(map[string]int),
+		}
+		s.stats[month] = stats
+	} else {
+		// Initialize maps if they're nil
+		if stats.UniqueVisitors == nil {
+			stats.UniqueVisitors = make(map[string]time.Time)
+		}
+		if stats.PopularUrls == nil {
+			stats.PopularUrls = make(map[string]int)
+		}
+	}
+
+	// Migrate data
+	for ip, timestamp := range oldStats.UniqueVisitors {
+		stats.UniqueVisitors[ip] = timestamp
+	}
+	for url, count := range oldStats.PopularUrls {
+		stats.PopularUrls[url] = count
+	}
+	stats.AnalysisRequests = oldStats.AnalysisRequests
+	stats.ErrorCount = oldStats.ErrorCount
+	stats.TotalLoadTime = oldStats.AverageLoadTime * float64(oldStats.AnalysisRequests)
+	stats.TotalRequests = oldStats.AnalysisRequests
+	stats.LastUpdated = oldStats.LastPersisted
+
+	// Request immediate write of migrated data
+	s.requestWrite()
+
+	// Rename old statistics file to prevent re-migration
+	backupPath := oldStatsPath + ".bak"
+	return os.Rename(oldStatsPath, backupPath)
+}
+
+// TrackVisitor records a unique visitor
+func (s *Storage) TrackVisitor(ip string) {
+	month := getCurrentMonth()
+	
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	stats, exists := s.stats[month]
+	if !exists {
+		stats = &MonthlyStats{
+			UniqueVisitors: make(map[string]time.Time),
+			PopularUrls:    make(map[string]int),
+		}
+		s.stats[month] = stats
+	}
+
+	stats.UniqueVisitors[ip] = time.Now()
+	stats.LastUpdated = time.Now()
+
+	if time.Since(s.lastWrite) > time.Minute {
+		s.requestWrite()
+		s.lastWrite = time.Now()
+	}
+}
+
+// TrackAnalysis records an analysis request
+func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
+	month := getCurrentMonth()
+	
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	stats, exists := s.stats[month]
+	if !exists {
+		stats = &MonthlyStats{
+			UniqueVisitors: make(map[string]time.Time),
+			PopularUrls:    make(map[string]int),
+		}
+		s.stats[month] = stats
+	}
+
+	stats.AnalysisRequests++
+	stats.TotalRequests++
+	stats.TotalLoadTime += loadTime
+	if isError {
+		stats.ErrorCount++
+	}
+	stats.PopularUrls[url]++
+	stats.LastUpdated = time.Now()
+
+	if time.Since(s.lastWrite) > time.Minute {
+		s.requestWrite()
+		s.lastWrite = time.Now()
+	}
 }
 
 // load reads statistics from file
@@ -133,8 +281,19 @@ func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMis
 
 	stats, exists := s.stats[month]
 	if !exists {
-		stats = &MonthlyStats{}
+		stats = &MonthlyStats{
+			UniqueVisitors: make(map[string]time.Time),
+			PopularUrls:    make(map[string]int),
+		}
 		s.stats[month] = stats
+	} else {
+		// Ensure maps are initialized
+		if stats.UniqueVisitors == nil {
+			stats.UniqueVisitors = make(map[string]time.Time)
+		}
+		if stats.PopularUrls == nil {
+			stats.PopularUrls = make(map[string]int)
+		}
 	}
 
 	stats.AnalysisCacheHits += analysisHits
@@ -158,9 +317,19 @@ func (s *Storage) GetCurrentStats() MonthlyStats {
 	defer s.mutex.RUnlock()
 
 	if stats, exists := s.stats[month]; exists {
+		// Ensure maps are initialized
+		if stats.UniqueVisitors == nil {
+			stats.UniqueVisitors = make(map[string]time.Time)
+		}
+		if stats.PopularUrls == nil {
+			stats.PopularUrls = make(map[string]int)
+		}
 		return *stats
 	}
-	return MonthlyStats{}
+	return MonthlyStats{
+		UniqueVisitors: make(map[string]time.Time),
+		PopularUrls:    make(map[string]int),
+	}
 }
 
 // Cleanup removes statistics older than the specified number of months

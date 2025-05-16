@@ -13,7 +13,6 @@ import (
 
 	"github.com/seo-optimizer/backend/analyzer"
 	"github.com/seo-optimizer/backend/middleware"
-	"github.com/seo-optimizer/backend/logging"
 )
 
 var (
@@ -167,9 +166,6 @@ func main() {
 	requests, duration := getRateLimitConfig()
 	rateLimiter = middleware.NewRateLimiter(float64(requests), float64(duration * 5)) // Convert to float64
 
-	// Initialize statistics
-	stats := logging.Initialize()
-
 	// Initialize Gin router
 	r := gin.Default()
 
@@ -215,20 +211,19 @@ func main() {
 		// Get the real IP address
 		ip := c.ClientIP()
 		
-		// Track unique visitor
-		stats.TrackVisitor(ip)
+		// Track unique visitor using the new stats system
+		if stats := seoAnalyzer.GetStats(); stats != nil {
+			stats.TrackVisitor(ip)
+		}
 		
 		c.Next()
 		
 		// Only track analysis requests
 		if c.Request.URL.Path == "/api/analyze" && c.Request.Method == "POST" {
 			loadTime := float64(time.Since(start).Milliseconds())
-			stats.TrackAnalysis(c.Request.URL.String(), loadTime, c.Writer.Status() >= 400)
-		}
-		
-		// Periodically save statistics
-		if stats.GetStatistics()["totalRequests"].(int)%100 == 0 {
-			go stats.Save()
+			if stats := seoAnalyzer.GetStats(); stats != nil {
+				stats.TrackAnalysis(c.Request.URL.String(), loadTime, c.Writer.Status() >= 400)
+			}
 		}
 	})
 
@@ -251,7 +246,32 @@ func main() {
 		
 		// Statistics endpoint
 		api.GET("/statistics", func(c *gin.Context) {
-			c.JSON(http.StatusOK, stats.GetStatistics())
+			if stats := seoAnalyzer.GetStats(); stats != nil {
+				currentStats := stats.GetCurrentStats()
+				
+				// Calculate average load time
+				var avgLoadTime float64
+				if currentStats.TotalRequests > 0 {
+					avgLoadTime = currentStats.TotalLoadTime / float64(currentStats.TotalRequests)
+				}
+				
+				// Prepare response based on mode
+				response := gin.H{
+					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
+					"totalRequests":     currentStats.TotalRequests,
+					"errorRate":         float64(currentStats.ErrorCount) / float64(currentStats.TotalRequests+1) * 100,
+					"averageLoadTime":   avgLoadTime,
+				}
+				
+				// Include popular URLs only in development mode
+				if os.Getenv("GIN_MODE") != "release" {
+					response["popularUrls"] = currentStats.PopularUrls
+				}
+				
+				c.JSON(http.StatusOK, response)
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Statistics not available"})
+			}
 		})
 	}
 
