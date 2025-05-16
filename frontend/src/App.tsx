@@ -102,17 +102,41 @@ function App() {
     const totalSteps = steps.length;
     let currentStepIndex = 0;
 
-    const progressInterval = setInterval(() => {
-      if (currentStepIndex < totalSteps) {
-        setCurrentStep(steps[currentStepIndex]);
-        setProgress(Math.round((currentStepIndex + 1) * (100 / totalSteps)));
-        currentStepIndex++;
-      } else {
-        clearInterval(progressInterval);
-      }
-    }, 1000);
+    // Faster initial steps, slower for resource-intensive steps
+    const stepTiming = {
+      init: 300,      // Quick initialization
+      meta: 300,      // Meta tags are quick to check
+      content: 400,   // Content analysis takes a bit longer
+      performance: 500, // Performance checks need more time
+      links: 600,     // Link checking is usually the longest
+      final: 300      // Quick recommendation generation
+    };
 
-    return () => clearInterval(progressInterval);
+    const updateProgress = () => {
+      if (currentStepIndex < totalSteps) {
+        const currentStepName = steps[currentStepIndex];
+        setCurrentStep(currentStepName);
+        
+        // Calculate cumulative progress
+        const completedProgress = currentStepIndex * (100 / totalSteps);
+        const stepProgress = (100 / totalSteps);
+        setProgress(Math.round(completedProgress + stepProgress));
+        
+        currentStepIndex++;
+        
+        // Schedule next step
+        if (currentStepIndex < totalSteps) {
+          setTimeout(updateProgress, stepTiming[steps[currentStepIndex] as keyof typeof stepTiming]);
+        }
+      }
+    };
+
+    // Start the progress animation
+    updateProgress();
+
+    return () => {
+      currentStepIndex = totalSteps; // Ensure cleanup stops the animation
+    };
   }, [loading]);
 
   const handleAnalyze = useCallback(async () => {
@@ -124,6 +148,10 @@ function App() {
     try {
       setLoading(true);
       setError(null);
+      setProgress(0);
+      setCurrentStep('init');
+      
+      const startTime = Date.now();
       
       const response = await fetch(`${apiUrl}/analyze`, {
         method: 'POST',
@@ -138,6 +166,15 @@ function App() {
       }
 
       const data = await response.json();
+      
+      // Ensure minimum animation time for UX
+      const analysisTime = Date.now() - startTime;
+      const minAnimationTime = 2000; // Minimum 2 seconds for smooth UX
+      
+      if (analysisTime < minAnimationTime) {
+        await new Promise(resolve => setTimeout(resolve, minAnimationTime - analysisTime));
+      }
+      
       setResult(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
