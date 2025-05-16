@@ -158,7 +158,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ 
+          url,
+          track: process.env.NODE_ENV === 'development' // Only track in development mode
+        }),
       });
 
       if (!response.ok) {
@@ -193,12 +196,6 @@ function App() {
 
   const formatTime = useCallback((ms: number) => {
     return ms > 1000 ? `${(ms / 1000).toFixed(2)}s` : `${ms}ms`;
-  }, []);
-
-  const getScoreColor = useCallback((score: number) => {
-    if (score >= 80) return 'text-green-600';
-    if (score >= 60) return 'text-yellow-600';
-    return 'text-red-600';
   }, []);
 
   const getStatusIndicator = useCallback((value: string | boolean, type: 'severity' | 'boolean') => {

@@ -74,21 +74,25 @@ const Statistics: React.FC<StatisticsProps> = ({ apiUrl }) => {
             <div className="stat-title">Unique Visitors (24h)</div>
             <div className="stat-value">{stats.uniqueVisitors24h}</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-title">Total Analyses</div>
-            <div className="stat-value">{stats.totalRequests}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-title">Error Rate</div>
-            <div className="stat-value">{stats.errorRate.toFixed(1)}%</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-title">Avg. Load Time</div>
-            <div className="stat-value">{stats.averageLoadTime.toFixed(0)}ms</div>
-          </div>
+          {process.env.NODE_ENV === 'development' && (
+            <>
+              <div className="stat-card">
+                <div className="stat-title">Total Analyses</div>
+                <div className="stat-value">{stats.totalRequests}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-title">Error Rate</div>
+                <div className="stat-value">{stats.errorRate.toFixed(1)}%</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-title">Avg. Load Time</div>
+                <div className="stat-value">{stats.averageLoadTime.toFixed(0)}ms</div>
+              </div>
+            </>
+          )}
         </div>
         
-        {stats.popularUrls && Object.keys(stats.popularUrls).length > 0 && (
+        {process.env.NODE_ENV === 'development' && stats.popularUrls && Object.keys(stats.popularUrls).length > 0 && (
           <div className="popular-urls">
             <h4>📊 Most Analyzed URLs</h4>
             <ul>

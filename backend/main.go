@@ -208,8 +208,6 @@ func main() {
 
 	// Convert standard middleware to Gin middleware
 	r.Use(func(c *gin.Context) {
-		start := time.Now()
-		
 		// Get the real IP address
 		ip := c.ClientIP()
 		
@@ -219,14 +217,6 @@ func main() {
 		}
 		
 		c.Next()
-		
-		// Only track analysis requests
-		if c.Request.URL.Path == "/api/analyze" && c.Request.Method == "POST" {
-			loadTime := float64(time.Since(start).Milliseconds())
-			if stats := seoAnalyzer.GetStats(); stats != nil {
-				stats.TrackAnalysis(c.Request.URL.String(), loadTime, c.Writer.Status() >= 400)
-			}
-		}
 	})
 
 	// API routes
@@ -257,6 +247,16 @@ func main() {
 					avgLoadTime = currentStats.TotalLoadTime / float64(currentStats.TotalRequests)
 				}
 				
+				// Filter out /api/analyze from popularUrls if it exists
+				filteredUrls := make(map[string]int)
+				if currentStats.PopularUrls != nil {
+					for url, count := range currentStats.PopularUrls {
+						if url != "/api/analyze" {
+							filteredUrls[url] = count
+						}
+					}
+				}
+				
 				// Prepare response based on mode
 				response := gin.H{
 					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
@@ -265,9 +265,9 @@ func main() {
 					"averageLoadTime":   avgLoadTime,
 				}
 				
-				// Include popular URLs only in development mode
+				// Include filtered popular URLs only in development mode
 				if os.Getenv("GIN_MODE") != "release" {
-					response["popularUrls"] = currentStats.PopularUrls
+					response["popularUrls"] = filteredUrls
 				}
 				
 				c.JSON(http.StatusOK, response)
@@ -322,9 +322,11 @@ func main() {
 }
 
 func analyzeURL(c *gin.Context) {
+	start := time.Now()
 	log.Printf("Analyze request received from: %s\n", c.ClientIP())
 	var request struct {
-		URL string `json:"url" binding:"required,url"`
+		URL   string `json:"url" binding:"required,url"`
+		Track bool   `json:"track"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -340,6 +342,14 @@ func analyzeURL(c *gin.Context) {
 			"error": "Failed to analyze URL: " + err.Error(),
 		})
 		return
+	}
+
+	// Track the analysis if requested (in development mode)
+	if request.Track {
+		loadTime := float64(time.Since(start).Milliseconds())
+		if stats := seoAnalyzer.GetStats(); stats != nil {
+			stats.TrackAnalysis(request.URL, loadTime, false)
+		}
 	}
 
 	c.JSON(http.StatusOK, analysis)
