@@ -16,13 +16,15 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Detailed recommendations for improvement
 - Modern, responsive UI
 - Statistics Dashboard:
+  - Monthly statistics tracking
+  - Automatic data retention management
   - Unique visitors tracking
   - Analysis request monitoring
   - Error rate tracking
   - Average load time metrics
   - Most analyzed URLs (development mode)
 - Environment-aware configuration
-- Persistent statistics storage
+- Persistent statistics storage with automatic cleanup
 
 ## Tech Stack
 
@@ -30,7 +32,8 @@ A modern web application for analyzing and optimizing website SEO performance. B
 - Go 1.21
 - Gin web framework
 - goquery for HTML parsing
-- Custom statistics tracking
+- Custom statistics tracking with persistence
+- Automatic monthly data rotation
 
 ### Frontend
 - React 18
@@ -87,13 +90,19 @@ cd frontend
 npm install
 ```
 
-3. Start the backend server (development mode)
+3. Create local data directory
+```bash
+cd backend
+mkdir -p data
+```
+
+4. Start the backend server (development mode)
 ```bash
 cd backend
 DEV_MODE=true go run main.go
 ```
 
-4. Start the frontend development server
+5. Start the frontend development server
 ```bash
 cd frontend
 npm start
@@ -130,6 +139,25 @@ Response (Production):
 }
 ```
 
+### GET /api/cache-status
+Retrieves cache statistics and status
+
+Response:
+```json
+{
+  "stats": {
+    "analysisEntries": 100,
+    "linkEntries": 500,
+    "analysisCacheHits": 80,
+    "linkCacheHits": 400,
+    "analysisCacheMisses": 20,
+    "linkCacheMisses": 100
+  },
+  "url": "https://example.com",
+  "isCached": true
+}
+```
+
 ### POST /api/analyze
 Analyzes a website's SEO performance
 
@@ -161,15 +189,29 @@ Response:
 
 Backend:
 - `DEV_MODE`: Enable/disable development features (default: false)
-- `PORT`: Server port (default: 8081)
+- `PORT`: Server port (default: 8082)
 - `GIN_MODE`: Gin framework mode (default: release)
+- `DATA_DIR`: Statistics storage directory (default: /app/data in production, ./data in development)
 
 Frontend:
 - `REACT_APP_API_URL`: Backend API URL (default: /api)
 
 ## Data Persistence
 
-Statistics are stored in a Docker volume `seo-stats` and persist across container restarts and redeployments.
+### Statistics Storage
+- Statistics are stored monthly and automatically managed
+- Only current and previous month's data are retained
+- Automatic cleanup runs daily at midnight
+- Data persists across container restarts and redeployments
+
+### Storage Locations
+- Production: Docker volume `seo-stats` mounted at `/app/data`
+- Development: Local directory `./data` in the backend folder
+
+### Cache Management
+- Efficient in-memory caching with persistence
+- Automatic cache cleanup and size management
+- Configurable cache TTL and size limits
 
 ## Contributing
 
