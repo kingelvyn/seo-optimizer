@@ -97,3 +97,6 @@ frontend/public/sitemap.xsl
 .vscode/
 *.swp
 *.swo 
+
+# Documentation
+ssr-implement.md 
