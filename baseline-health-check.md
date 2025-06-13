@@ -1,16 +1,44 @@
 # SEO Optimizer Health Check Baseline
-Date: 2025-06-13 16:57:50
+Date: 2025-06-13 17:21:19
 
 ## Container Status
 Both containers are running normally:
 - Frontend: `seo-optimizer-frontend-1` (Up 30 minutes)
 - Backend: `seo-optimizer-backend-1` (Up 30 minutes)
 
+## Health Check Endpoint
+The `/api/health` endpoint provides detailed system health information:
+```json
+{
+  "cache": {
+    "analysisCacheHits": 0,
+    "analysisCacheMisses": 5,
+    "analysisEntries": 0,
+    "linkCacheHits": 0,
+    "linkCacheMisses": 18,
+    "linkEntries": 0
+  },
+  "memory": {
+    "alloc": 1568824,
+    "numGC": 1,
+    "sys": 12491792,
+    "totalAlloc": 3011568
+  },
+  "stats": {
+    "errorRate": 0,
+    "totalRequests": 5,
+    "uniqueVisitors24h": 3
+  },
+  "status": "ok",
+  "timestamp": "2025-06-13T17:21:19Z"
+}
+```
+
 ## Log Analysis
 No errors, warnings, or failures found in recent logs. Normal operation logs show:
 - Regular stats saving (every minute)
 - Visitor tracking
-- Single unique visitor (IP: 192.168.1.104)
+- Three unique visitors (IPs: 192.168.1.104, 172.0.0.1, and one additional)
 
 ## API Endpoint Status
 
@@ -19,12 +47,12 @@ No errors, warnings, or failures found in recent logs. Normal operation logs sho
 {
   "isCached": false,
   "stats": {
-    "analysisEntries": 2,
+    "analysisEntries": 0,
     "linkEntries": 0,
     "analysisCacheHits": 0,
     "linkCacheHits": 0,
-    "analysisCacheMisses": 2,
-    "linkCacheMisses": 17,
+    "analysisCacheMisses": 5,
+    "linkCacheMisses": 18,
     "analysisCacheTTL": 1800000000000,
     "linkCacheTTL": 600000000000
   },
@@ -37,8 +65,8 @@ No errors, warnings, or failures found in recent logs. Normal operation logs sho
 {
   "averageLoadTime": 1291.5,
   "errorRate": 0,
-  "totalRequests": 2,
-  "uniqueVisitors24h": 2
+  "totalRequests": 5,
+  "uniqueVisitors24h": 3
 }
 ```
 
@@ -63,13 +91,17 @@ Successfully analyzed example.com with expected response structure.
 ## Key Metrics to Monitor
 1. Memory usage (both containers well under 1%)
 2. Error rate (currently 0%)
-3. Cache statistics (2 analysis entries, 17 link cache misses)
+3. Cache statistics (0 analysis entries, 18 link cache misses)
 4. Average load time (1291.5ms)
-5. Number of unique visitors (2 in 24h)
+5. Number of unique visitors (3 in 24h)
+6. Health check status (currently "ok")
 
 ## Notes
 - All endpoints responding normally
 - No errors in logs
 - Resource usage is very low
 - Cache is functioning as expected
-- Analysis endpoint successfully processing requests 
+- Analysis endpoint successfully processing requests
+- Health check endpoint providing detailed system status
+- Memory allocation is stable (1.5MB current, 3MB total)
+- Garbage collection running normally (1 collection) 

@@ -3,24 +3,33 @@ node_modules/
 /frontend/node_modules/
 /frontend/.pnp
 /frontend/.pnp.js
+package-lock.json
+yarn.lock
 
 # Testing
 /frontend/coverage/
 /backend/coverage/
+*.test.js
+*.spec.js
+__tests__/
+__mocks__/
 
 # Production
 /frontend/build/
 /frontend/dist/
 /backend/bin/
+/dist/
+/tmp/
+/out-tsc/
 
 # Environment files
 .env
+.env.*
+!.env.template
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-.env.*
-!.env.template
 
 # Debug & Logs
 npm-debug.log*
@@ -28,11 +37,18 @@ yarn-debug.log*
 yarn-error.log*
 debug.log
 *.log
+libpeerconnection.log
+testem.log
 
 # Runtime data
 statistics.json
 /backend/data/
 /backend/tmp/
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!jsconfig.json
 
 # IDEs and editors
 .idea/
@@ -40,13 +56,12 @@ statistics.json
 *.swp
 *.swo
 *.swn
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
 *.sublime-workspace
 *.sublime-project
+.project
+.classpath
+.settings/
+*.code-workspace
 
 # System Files
 .DS_Store
@@ -61,29 +76,40 @@ Thumbs.db
 *.tmp
 *.temp
 *~
+.temp/
+.tmp/
 
-# Build output
-/dist/
-/tmp/
-/out-tsc/
-
-# Misc
-.sass-cache/
-connect.lock
-libpeerconnection.log
-testem.log
-/typings/
+# Build artifacts
 *.pem
 .eslintcache
+.sass-cache/
+connect.lock
+/typings/
 
 # Private files
 /opt/seo-optimizer/private/
 **/sitemap.xml
 **/sitemap.xsl
-
-# SEO files
 frontend/public/sitemap.xml
 frontend/public/sitemap.xsl
+
+# Docker
+.docker/
+docker-compose.override.yml
+*.env.docker
+
+# Backup files
+*.bak
+*.backup
+*_backup
+*.old
+
+# Cache directories
+.cache/
+.npm/
+.yarn/
+.pnp/
+.pnp.js
 
 # macOS
 .DS_Store
