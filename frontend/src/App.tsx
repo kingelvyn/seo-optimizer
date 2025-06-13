@@ -433,7 +433,13 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>SEO Optimizer - Website Analysis Tool</h1>
+        <h1
+          className="app-title-link"
+          style={{ cursor: 'pointer', color: '#4db8ff', textDecoration: 'underline' }}
+          onClick={() => window.location.href = '/'}
+        >
+          SEO Optimizer
+        </h1>
         <div className="analysis-form">
           <input
             type="url"

@@ -248,8 +248,79 @@ Request:
 Features:
 - Always tracks URLs for statistical purposes
 - Maintains URL privacy in production
-- Provides comprehensive analysis results
-- Updates statistics in real-time
+
+## Health Checks and Monitoring
+
+### Health Check Endpoint
+The application includes a comprehensive health check endpoint at `/api/health` that provides detailed system status:
+
+Response:
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "uptime": "2h30m",
+  "cache": {
+    "analysis": {
+      "entries": 100,
+      "hits": 80,
+      "misses": 20
+    },
+    "links": {
+      "entries": 500,
+      "hits": 400,
+      "misses": 100
+    }
+  },
+  "memory": {
+    "alloc": "50MB",
+    "totalAlloc": "200MB",
+    "sys": "100MB",
+    "numGC": 5
+  },
+  "stats": {
+    "uniqueVisitors24h": 100,
+    "totalRequests": 500,
+    "errorRate": 1.2,
+    "averageLoadTime": 250
+  }
+}
+```
+
+### Docker Health Checks
+The application implements Docker health checks to ensure service availability:
+
+- Backend health check runs every 30 seconds
+- Tests the `/api/health` endpoint
+- Configurable timeout and retry settings
+- Automatic container restart on health check failure
+
+### Monitoring Script
+A monitoring script (`monitor.sh`) is provided for manual health checks:
+
+Features:
+- Container status verification
+- Recent error log checking
+- API endpoint testing
+- Analysis functionality verification
+- Resource usage monitoring
+
+Usage:
+```bash
+# Make the script executable
+chmod +x monitor.sh
+
+# Run the health check
+./monitor.sh
+```
+
+### Logging Configuration
+Docker Compose includes logging configuration for both services:
+
+- Maximum log file size: 10MB
+- Maximum number of log files: 3
+- Automatic log rotation
+- Error and access log separation
 
 ## Configuration
 
