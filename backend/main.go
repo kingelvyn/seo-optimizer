@@ -226,16 +226,21 @@ func main() {
 		// Health check
 		api.GET("/health", func(c *gin.Context) {
 			log.Printf("Health check request received from: %s\n", c.ClientIP())
+			log.Printf("Health check headers: %v\n", c.Request.Header)
 
 			// Get cache statistics
 			cacheStats := seoAnalyzer.GetCacheStats()
+			log.Printf("Cache stats: %+v\n", cacheStats)
 
 			// Get current stats
 			currentStats := seoAnalyzer.GetStats().GetCurrentStats()
+			log.Printf("Current stats: %+v\n", currentStats)
 
 			// Calculate memory stats
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
+			log.Printf("Memory stats: Alloc=%v, TotalAlloc=%v, Sys=%v, NumGC=%v\n",
+				m.Alloc, m.TotalAlloc, m.Sys, m.NumGC)
 
 			// Prepare health response
 			health := gin.H{
@@ -262,6 +267,7 @@ func main() {
 				},
 			}
 
+			log.Printf("Sending health response: %+v\n", health)
 			c.JSON(http.StatusOK, health)
 		})
 
