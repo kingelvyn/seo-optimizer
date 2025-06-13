@@ -26,6 +26,11 @@ services:
       - "traefik.http.routers.sitemap.rule=Host(`seo-optimizer.elvynprise.xyz`) && Path(`/sitemap.xml`)"
       - "traefik.http.routers.sitemap.service=frontend"
       - "traefik.http.routers.sitemap.middlewares=sitemap-headers"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
@@ -53,6 +58,17 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`seo-optimizer.elvynprise.xyz`) && PathPrefix(`/api`)"
       - "traefik.http.services.backend.loadbalancer.server.port=8082"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   seo-network:

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -19,8 +20,8 @@ import (
 )
 
 var (
-	seoAnalyzer  *analyzer.Analyzer
-	rateLimiter  *middleware.RateLimiter
+	seoAnalyzer *analyzer.Analyzer
+	rateLimiter *middleware.RateLimiter
 )
 
 func loadEnv() {
@@ -54,7 +55,7 @@ func setupTrustedProxies(r *gin.Engine) error {
 	if dockerNetwork == "" {
 		dockerNetwork = "172.0.0.0/8" // Default Docker network
 	}
-	
+
 	return r.SetTrustedProxies([]string{dockerNetwork})
 }
 
@@ -66,7 +67,7 @@ func securityHeaders() gin.HandlerFunc {
 		c.Header("X-XSS-Protection", "1; mode=block")
 		c.Header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		c.Header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';")
-		
+
 		// Remove sensitive headers
 		c.Header("Server", "")
 		c.Next()
@@ -76,24 +77,24 @@ func securityHeaders() gin.HandlerFunc {
 func getRateLimitConfig() (int, int) {
 	requestsStr := os.Getenv("RATE_LIMIT_REQUESTS")
 	durationStr := os.Getenv("RATE_LIMIT_DURATION")
-	
+
 	requests, err := strconv.Atoi(requestsStr)
 	if err != nil || requests <= 0 {
 		requests = 2 // Default: 2 requests
 	}
-	
+
 	duration, err := strconv.Atoi(durationStr)
 	if err != nil || duration <= 0 {
 		duration = 1 // Default: 1 second
 	}
-	
+
 	return requests, duration
 }
 
 func initializeAnalyzer() (*analyzer.Analyzer, error) {
 	// Get data directory from environment variable
 	dataDir := os.Getenv("DATA_DIR")
-	
+
 	// If not set, use different defaults for development and production
 	if dataDir == "" {
 		if os.Getenv("GIN_MODE") == "release" {
@@ -155,7 +156,7 @@ func initializeAnalyzer() (*analyzer.Analyzer, error) {
 func main() {
 	// Load environment configuration
 	loadEnv()
-	
+
 	// Set up Gin mode
 	setupGinMode()
 
@@ -167,7 +168,7 @@ func main() {
 	}
 
 	requests, duration := getRateLimitConfig()
-	rateLimiter = middleware.NewRateLimiter(float64(requests), float64(duration * 5)) // Convert to float64
+	rateLimiter = middleware.NewRateLimiter(float64(requests), float64(duration*5)) // Convert to float64
 
 	// Initialize Gin router
 	r := gin.Default()
@@ -179,11 +180,11 @@ func main() {
 
 	// Add security headers
 	r.Use(securityHeaders())
-	
+
 	// Add middlewares
 	r.Use(middleware.ErrorHandler())
 	r.Use(rateLimiter.RateLimit())
-	
+
 	// CORS middleware with more restrictive settings
 	r.Use(func(c *gin.Context) {
 		// In development, allow all origins
@@ -192,7 +193,7 @@ func main() {
 			// In production, restrict to your domain
 			origin = "https://seo-optimizer.elvynprise.xyz"
 		}
-		
+
 		c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -210,12 +211,12 @@ func main() {
 	r.Use(func(c *gin.Context) {
 		// Get the real IP address
 		ip := c.ClientIP()
-		
+
 		// Track unique visitor using the new stats system
 		if stats := seoAnalyzer.GetStats(); stats != nil {
 			stats.TrackVisitor(ip)
 		}
-		
+
 		c.Next()
 	})
 
@@ -225,22 +226,56 @@ func main() {
 		// Health check
 		api.GET("/health", func(c *gin.Context) {
 			log.Printf("Health check request received from: %s\n", c.ClientIP())
-			c.JSON(http.StatusOK, gin.H{
-				"status": "ok",
-			})
+
+			// Get cache statistics
+			cacheStats := seoAnalyzer.GetCacheStats()
+
+			// Get current stats
+			currentStats := seoAnalyzer.GetStats().GetCurrentStats()
+
+			// Calculate memory stats
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			// Prepare health response
+			health := gin.H{
+				"status":    "ok",
+				"timestamp": time.Now().Format(time.RFC3339),
+				"cache": gin.H{
+					"analysisEntries":     cacheStats.AnalysisEntries,
+					"linkEntries":         cacheStats.LinkEntries,
+					"analysisCacheHits":   cacheStats.AnalysisCacheHits,
+					"linkCacheHits":       cacheStats.LinkCacheHits,
+					"analysisCacheMisses": cacheStats.AnalysisCacheMisses,
+					"linkCacheMisses":     cacheStats.LinkCacheMisses,
+				},
+				"memory": gin.H{
+					"alloc":      m.Alloc,
+					"totalAlloc": m.TotalAlloc,
+					"sys":        m.Sys,
+					"numGC":      m.NumGC,
+				},
+				"stats": gin.H{
+					"errorRate":         currentStats.ErrorCount,
+					"totalRequests":     currentStats.TotalRequests,
+					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
+				},
+			}
+
+			c.JSON(http.StatusOK, health)
 		})
 
 		// SEO analysis endpoints
 		api.POST("/analyze", analyzeURL)
-		
+
 		// Cache status endpoint
 		api.GET("/cache-status", getCacheStatus)
-		
+
 		// Statistics endpoint
 		api.GET("/statistics", func(c *gin.Context) {
 			if stats := seoAnalyzer.GetStats(); stats != nil {
 				currentStats := stats.GetCurrentStats()
-				
+
 				// Filter out /api/analyze from popularUrls and adjust counters
 				filteredUrls := make(map[string]int)
 				apiCallCount := 0
@@ -259,13 +294,13 @@ func main() {
 				if adjustedRequests < 0 {
 					adjustedRequests = 0
 				}
-				
+
 				// Calculate average load time based on actual analyses
 				var avgLoadTime float64
 				if adjustedRequests > 0 {
 					avgLoadTime = currentStats.TotalLoadTime / float64(adjustedRequests)
 				}
-				
+
 				// Prepare response with all numerical stats
 				response := gin.H{
 					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
@@ -273,12 +308,12 @@ func main() {
 					"errorRate":         float64(currentStats.ErrorCount) / float64(adjustedRequests+1) * 100,
 					"averageLoadTime":   avgLoadTime,
 				}
-				
+
 				// Include popular URLs only in development mode
 				if os.Getenv("GIN_MODE") != "release" {
 					response["popularUrls"] = filteredUrls
 				}
-				
+
 				c.JSON(http.StatusOK, response)
 			} else {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Statistics not available"})
@@ -368,20 +403,20 @@ func analyzeURL(c *gin.Context) {
 
 func getCacheStatus(c *gin.Context) {
 	log.Printf("Cache status request received from: %s\n", c.ClientIP())
-	
+
 	// Get cache statistics
 	stats := seoAnalyzer.GetCacheStats()
-	
+
 	// Check if a specific URL is cached
 	url := c.Query("url")
 	isCached := false
 	if url != "" {
 		isCached = seoAnalyzer.IsCached(url)
 	}
-	
+
 	c.JSON(http.StatusOK, gin.H{
-		"stats": stats,
-		"url": url,
+		"stats":    stats,
+		"url":      url,
 		"isCached": isCached,
 	})
-} 
+}
