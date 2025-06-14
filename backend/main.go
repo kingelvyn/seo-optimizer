@@ -242,6 +242,9 @@ func main() {
 			log.Printf("Memory stats: Alloc=%v, TotalAlloc=%v, Sys=%v, NumGC=%v\n",
 				m.Alloc, m.TotalAlloc, m.Sys, m.NumGC)
 
+			// Log goroutine count
+			log.Printf("[DEBUG] Goroutine count: %d\n", runtime.NumGoroutine())
+
 			// Prepare health response
 			health := gin.H{
 				"status":    "ok",

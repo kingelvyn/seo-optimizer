@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -25,19 +26,19 @@ var (
 			return new(bytes.Buffer)
 		},
 	}
-	
+
 	urlSlicePool = sync.Pool{
 		New: func() interface{} {
 			return make([]string, 0, 100)
 		},
 	}
-	
+
 	mapPool = sync.Pool{
 		New: func() interface{} {
 			return make(map[string]bool, 100)
 		},
 	}
-	
+
 	analysisPool = sync.Pool{
 		New: func() interface{} {
 			return &SEOAnalysis{
@@ -72,18 +73,18 @@ type CacheStats struct {
 
 // Analyzer performs SEO analysis on a given URL
 type Analyzer struct {
-	client            *http.Client
-	cache             map[string]cacheEntry
-	cacheMutex        sync.RWMutex
-	cacheTTL          time.Duration
-	linkCache         map[string]linkCacheEntry
-	linkCacheMutex    sync.RWMutex
-	linkCacheTTL      time.Duration
-	maxCacheSize      int
-	maxLinkCacheSize  int
-	lastCleanup       time.Time
-	cleanupInterval   time.Duration
-	stats             *stats.Storage
+	client           *http.Client
+	cache            map[string]cacheEntry
+	cacheMutex       sync.RWMutex
+	cacheTTL         time.Duration
+	linkCache        map[string]linkCacheEntry
+	linkCacheMutex   sync.RWMutex
+	linkCacheTTL     time.Duration
+	maxCacheSize     int
+	maxLinkCacheSize int
+	lastCleanup      time.Time
+	cleanupInterval  time.Duration
+	stats            *stats.Storage
 }
 
 // Link cache entry
@@ -105,19 +106,19 @@ func New(dataDir string) (*Analyzer, error) {
 		TLSHandshakeTimeout: 10 * time.Second, // Default is 10s
 		DisableCompression:  false,            // Enable compression
 	}
-	
+
 	// Initialize statistics storage
 	statsStorage, err := stats.NewStorage(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize stats storage: %w", err)
 	}
-	
+
 	analyzer := &Analyzer{
 		client: &http.Client{
 			Timeout:   15 * time.Second,
 			Transport: transport,
 		},
-		cache:             make(map[string]cacheEntry),
+		cache:            make(map[string]cacheEntry),
 		cacheTTL:         30 * time.Minute, // Cache results for 30 minutes
 		linkCache:        make(map[string]linkCacheEntry),
 		linkCacheTTL:     10 * time.Minute, // Cache link status for 10 minutes
@@ -127,10 +128,10 @@ func New(dataDir string) (*Analyzer, error) {
 		lastCleanup:      time.Now(),
 		stats:            statsStorage,
 	}
-	
+
 	// Start cleanup goroutine
 	go analyzer.periodicCleanup()
-	
+
 	return analyzer, nil
 }
 
@@ -147,15 +148,16 @@ func (a *Analyzer) periodicCleanup() {
 // cleanup removes expired entries and ensures cache size limits
 func (a *Analyzer) cleanup() {
 	now := time.Now()
-	
-	// Cleanup analysis cache
+	// Debug: log before acquiring cacheMutex
+	log.Println("[DEBUG] Attempting to acquire cacheMutex in cleanup")
 	a.cacheMutex.Lock()
+	log.Println("[DEBUG] Acquired cacheMutex in cleanup")
 	for key, entry := range a.cache {
 		if now.Sub(entry.timestamp) > a.cacheTTL {
 			delete(a.cache, key)
 		}
 	}
-	
+
 	// If still over size limit, remove oldest entries
 	if len(a.cache) > a.maxCacheSize {
 		// Convert map to slice for sorting
@@ -163,34 +165,36 @@ func (a *Analyzer) cleanup() {
 			key       string
 			timestamp time.Time
 		}, 0, len(a.cache))
-		
+
 		for key, entry := range a.cache {
 			entries = append(entries, struct {
 				key       string
 				timestamp time.Time
 			}{key, entry.timestamp})
 		}
-		
+
 		// Sort by timestamp
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
-		
+
 		// Remove oldest entries until under limit
 		for i := 0; i < len(entries)-a.maxCacheSize; i++ {
 			delete(a.cache, entries[i].key)
 		}
 	}
+	log.Println("[DEBUG] Releasing cacheMutex in cleanup")
 	a.cacheMutex.Unlock()
-	
+
 	// Cleanup link cache
 	a.linkCacheMutex.Lock()
+	log.Println("[DEBUG] Acquired linkCacheMutex in cleanup")
 	for key, entry := range a.linkCache {
 		if now.Sub(entry.timestamp) > a.linkCacheTTL {
 			delete(a.linkCache, key)
 		}
 	}
-	
+
 	// If still over size limit, remove oldest entries
 	if len(a.linkCache) > a.maxLinkCacheSize {
 		// Convert map to slice for sorting
@@ -198,26 +202,27 @@ func (a *Analyzer) cleanup() {
 			key       string
 			timestamp time.Time
 		}, 0, len(a.linkCache))
-		
+
 		for key, entry := range a.linkCache {
 			entries = append(entries, struct {
 				key       string
 				timestamp time.Time
 			}{key, entry.timestamp})
 		}
-		
+
 		// Sort by timestamp
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].timestamp.Before(entries[j].timestamp)
 		})
-		
+
 		// Remove oldest entries until under limit
 		for i := 0; i < len(entries)-a.maxLinkCacheSize; i++ {
 			delete(a.linkCache, entries[i].key)
 		}
 	}
+	log.Println("[DEBUG] Releasing linkCacheMutex in cleanup")
 	a.linkCacheMutex.Unlock()
-	
+
 	a.lastCleanup = now
 }
 
@@ -260,17 +265,17 @@ func generateCacheKey(url string) string {
 // GetCacheStats returns statistics about the cache
 func (a *Analyzer) GetCacheStats() CacheStats {
 	currentStats := a.stats.GetCurrentStats()
-	
+
 	a.cacheMutex.RLock()
 	analysisEntries := len(a.cache)
 	analysisTTL := a.cacheTTL
 	a.cacheMutex.RUnlock()
-	
+
 	a.linkCacheMutex.RLock()
 	linkEntries := len(a.linkCache)
 	linkTTL := a.linkCacheTTL
 	a.linkCacheMutex.RUnlock()
-	
+
 	return CacheStats{
 		AnalysisEntries:     analysisEntries,
 		LinkEntries:         linkEntries,
@@ -288,7 +293,7 @@ func (a *Analyzer) IsCached(url string) bool {
 	cacheKey := generateCacheKey(url)
 	a.cacheMutex.RLock()
 	defer a.cacheMutex.RUnlock()
-	
+
 	entry, found := a.cache[cacheKey]
 	if found && time.Since(entry.timestamp) < a.cacheTTL {
 		return true
@@ -298,49 +303,51 @@ func (a *Analyzer) IsCached(url string) bool {
 
 // Analyze performs a complete SEO analysis of the given URL
 func (a *Analyzer) Analyze(url string) (*SEOAnalysis, error) {
-	// Check if cleanup is needed
+	log.Println("[DEBUG] Analyze: Checking if cleanup is needed")
 	if time.Since(a.lastCleanup) > a.cleanupInterval {
 		go a.cleanup() // Run cleanup in background
 	}
-	
-	// Create a context with timeout for the entire analysis process
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
-	// Check cache first
+
 	cacheKey := generateCacheKey(url)
+	log.Println("[DEBUG] Analyze: Attempting to acquire cacheMutex (read)")
 	a.cacheMutex.RLock()
+	log.Println("[DEBUG] Analyze: Acquired cacheMutex (read)")
 	if entry, found := a.cache[cacheKey]; found {
 		if time.Since(entry.timestamp) < a.cacheTTL {
-			a.stats.IncrementStats(1, 0, 0, 0) // Increment analysis cache hits
+			a.stats.IncrementStats(1, 0, 0, 0)
 			a.cacheMutex.RUnlock()
 			return entry.analysis, nil
 		}
 	}
 	a.cacheMutex.RUnlock()
-	
-	// Not in cache or expired
-	a.stats.IncrementStats(0, 1, 0, 0) // Increment analysis cache misses
-	
-	// Perform analysis
+	log.Println("[DEBUG] Analyze: Released cacheMutex (read)")
+
+	a.stats.IncrementStats(0, 1, 0, 0)
+
 	analysis, err := a.AnalyzeWithContext(ctx, url)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Store in cache
+
+	log.Println("[DEBUG] Analyze: Attempting to acquire cacheMutex (write)")
 	a.cacheMutex.Lock()
+	log.Println("[DEBUG] Analyze: Acquired cacheMutex (write)")
 	a.cache[cacheKey] = cacheEntry{
 		analysis:  analysis,
 		timestamp: time.Now(),
 	}
+	log.Println("[DEBUG] Analyze: Releasing cacheMutex (write)")
 	a.cacheMutex.Unlock()
-	
+
 	return analysis, nil
 }
 
 // AnalyzeWithContext performs a complete SEO analysis of the given URL with context
 func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnalysis, error) {
+	log.Println("[DEBUG] AnalyzeWithContext: Starting analysis for URL:", url)
 	startTime := time.Now()
 
 	// Get an analysis object from the pool
@@ -355,7 +362,7 @@ func (a *Analyzer) AnalyzeWithContext(ctx context.Context, url string) (*SEOAnal
 		analysisPool.Put(analysis)
 		return nil, err
 	}
-	
+
 	// Set user agent to avoid being blocked by some websites
 	req.Header.Set("User-Agent", "SEOAnalyzer/1.0")
 
@@ -561,9 +568,9 @@ func (a *Analyzer) analyzeContent(doc *goquery.Document) ContentAnalysis {
 
 func (a *Analyzer) analyzePerformance(pageSize int, loadTime time.Duration, mobileOptimized bool) Performance {
 	perf := Performance{
-		PageSize:        pageSize,
-		LoadTime:        int(loadTime.Milliseconds()),
-		MobileOptimized: mobileOptimized,
+		PageSize:         pageSize,
+		LoadTime:         int(loadTime.Milliseconds()),
+		MobileOptimized:  mobileOptimized,
 		PageSizeSeverity: "good",
 		LoadTimeSeverity: "good",
 	}
@@ -619,14 +626,14 @@ func (a *Analyzer) analyzePerformance(pageSize int, loadTime time.Duration, mobi
 // analyzeLinksWithContext analyzes links with context awareness
 func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Document, baseURL string) LinkAnalysis {
 	links := LinkAnalysis{}
-	
+
 	// Get a map from the pool
 	checkedLinks := mapPool.Get().(map[string]bool)
 	for k := range checkedLinks {
 		delete(checkedLinks, k)
 	}
 	defer mapPool.Put(checkedLinks)
-	
+
 	// Get a URL slice from the pool
 	linkURLs := urlSlicePool.Get().([]string)
 	linkURLs = linkURLs[:0] // Reset the slice while keeping capacity
@@ -652,7 +659,7 @@ func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Doc
 			return
 		}
 		checkedLinks[href] = true
-		
+
 		// Categorize the link
 		if strings.HasPrefix(href, baseURL) || strings.HasPrefix(href, "/") {
 			links.InternalLinks++
@@ -662,16 +669,16 @@ func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Doc
 			linkURLs = append(linkURLs, href)
 		}
 	})
-	
+
 	// Now check all links concurrently with controlled parallelism
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, 10) // Limit to 10 concurrent requests
-	var mu sync.Mutex // Mutex to protect the brokenLinks counter
-	
+	var mu sync.Mutex                    // Mutex to protect the brokenLinks counter
+
 	// Create a context that will be canceled when the function returns
 	linkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	
+
 	for _, url := range linkURLs {
 		// Check if the parent context is canceled
 		select {
@@ -681,14 +688,14 @@ func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Doc
 		default:
 			// Continue processing
 		}
-		
+
 		wg.Add(1)
 		go func(url string) {
 			defer wg.Done()
-			
-			semaphore <- struct{}{} // Acquire semaphore
+
+			semaphore <- struct{}{}        // Acquire semaphore
 			defer func() { <-semaphore }() // Release semaphore
-			
+
 			if !a.isLinkAccessibleWithContext(linkCtx, url) {
 				mu.Lock()
 				links.BrokenLinks++
@@ -696,14 +703,14 @@ func (a *Analyzer) analyzeLinksWithContext(ctx context.Context, doc *goquery.Doc
 			}
 		}(url)
 	}
-	
+
 	// Use a channel to signal completion or timeout
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
 		close(done)
 	}()
-	
+
 	// Wait for completion or context cancellation
 	select {
 	case <-done:
@@ -760,31 +767,31 @@ func (a *Analyzer) isLinkAccessibleWithContext(ctx context.Context, url string) 
 		}
 	}
 	a.linkCacheMutex.RUnlock()
-	
+
 	// Not in cache or expired
 	a.stats.IncrementStats(0, 0, 0, 1) // Increment link cache misses
-	
+
 	// Create a request with context
 	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
 		return a.cacheAndReturnLinkStatus(cacheKey, false)
 	}
-	
+
 	// Set user agent to avoid being blocked by some websites
 	req.Header.Set("User-Agent", "SEOAnalyzer/1.0")
-	
+
 	// Create a client with a shorter timeout for link checking
 	client := &http.Client{
-		Timeout: 5 * time.Second, // Shorter timeout just for link checking
+		Timeout:   5 * time.Second, // Shorter timeout just for link checking
 		Transport: a.client.Transport,
 	}
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return a.cacheAndReturnLinkStatus(cacheKey, false)
 	}
 	defer resp.Body.Close()
-	
+
 	accessible := resp.StatusCode >= 200 && resp.StatusCode < 400
 	return a.cacheAndReturnLinkStatus(cacheKey, accessible)
 }
@@ -793,12 +800,12 @@ func (a *Analyzer) isLinkAccessibleWithContext(ctx context.Context, url string) 
 func (a *Analyzer) cacheAndReturnLinkStatus(cacheKey string, accessible bool) bool {
 	a.linkCacheMutex.Lock()
 	defer a.linkCacheMutex.Unlock()
-	
+
 	a.linkCache[cacheKey] = linkCacheEntry{
 		accessible: accessible,
 		timestamp:  time.Now(),
 	}
-	
+
 	return accessible
 }
 
@@ -872,53 +879,53 @@ func (a *Analyzer) generateRecommendations(analysis *SEOAnalysis) []string {
 	// Performance recommendations
 	pageSizeKB := float64(analysis.Performance.PageSize) / 1024.0
 	if pageSizeKB > 5120 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Critical: Page size is extremely large (>5MB). Consider optimizing images, minifying CSS/JS, and removing unnecessary resources")
 	} else if pageSizeKB > 2048 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Major: Page size is very large (>2MB). Optimize images and consider lazy loading for non-critical resources")
 	} else if pageSizeKB > 1024 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Moderate: Page size is large (>1MB). Look for opportunities to optimize images and resources")
 	} else if pageSizeKB > 500 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Minor: Page size is above optimal (>500KB). Consider basic optimization techniques")
 	}
 
 	if analysis.Performance.LoadTime > 3000 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Critical: Page load time is extremely slow (>3s). Consider using a CDN, optimizing server response time, and reducing resource size")
 	} else if analysis.Performance.LoadTime > 2000 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Major: Page load time is slow (>2s). Optimize server response time and consider resource optimization")
 	} else if analysis.Performance.LoadTime > 1500 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Moderate: Page load time is above optimal (>1.5s). Look for opportunities to improve performance")
 	} else if analysis.Performance.LoadTime > 1000 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Minor: Page load time is slightly above optimal (>1s). Consider fine-tuning performance")
 	}
 
 	if !analysis.Performance.MobileOptimized {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Add a proper viewport meta tag for mobile optimization (e.g., <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">)")
 	}
 
 	// Links recommendations
 	if analysis.Links.BrokenLinks > 0 {
-		recommendations = append(recommendations, 
-			"Fix broken links: Found " + strconv.Itoa(analysis.Links.BrokenLinks) + " broken link(s)")
+		recommendations = append(recommendations,
+			"Fix broken links: Found "+strconv.Itoa(analysis.Links.BrokenLinks)+" broken link(s)")
 	}
 	if analysis.Links.InternalLinks < 3 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Add more internal links to improve site navigation and SEO (aim for at least 3-5)")
 	}
 	if analysis.Links.ExternalLinks == 0 {
-		recommendations = append(recommendations, 
+		recommendations = append(recommendations,
 			"Add relevant external links to authoritative sources to improve content credibility")
 	} else if analysis.Links.ExternalLinks > 50 {
-		recommendations = append(recommendations, 
-			"Consider reducing the number of external links (current: " + strconv.Itoa(analysis.Links.ExternalLinks) + ") to maintain focus")
+		recommendations = append(recommendations,
+			"Consider reducing the number of external links (current: "+strconv.Itoa(analysis.Links.ExternalLinks)+") to maintain focus")
 	}
 
 	return recommendations
