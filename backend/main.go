@@ -225,53 +225,11 @@ func main() {
 	{
 		// Health check
 		api.GET("/health", func(c *gin.Context) {
-			log.Printf("Health check request received from: %s\n", c.ClientIP())
-			log.Printf("Health check headers: %v\n", c.Request.Header)
-
-			// Get cache statistics
-			cacheStats := seoAnalyzer.GetCacheStats()
-			log.Printf("Cache stats: %+v\n", cacheStats)
-
-			// Get current stats
-			currentStats := seoAnalyzer.GetStats().GetCurrentStats()
-			log.Printf("Current stats: %+v\n", currentStats)
-
-			// Calculate memory stats
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Printf("Memory stats: Alloc=%v, TotalAlloc=%v, Sys=%v, NumGC=%v\n",
-				m.Alloc, m.TotalAlloc, m.Sys, m.NumGC)
-
-			// Log goroutine count
-			log.Printf("[DEBUG] Goroutine count: %d\n", runtime.NumGoroutine())
-
-			// Prepare health response
-			health := gin.H{
+			// Simple health check - just return status
+			c.JSON(http.StatusOK, gin.H{
 				"status":    "ok",
 				"timestamp": time.Now().Format(time.RFC3339),
-				"cache": gin.H{
-					"analysisEntries":     cacheStats.AnalysisEntries,
-					"linkEntries":         cacheStats.LinkEntries,
-					"analysisCacheHits":   cacheStats.AnalysisCacheHits,
-					"linkCacheHits":       cacheStats.LinkCacheHits,
-					"analysisCacheMisses": cacheStats.AnalysisCacheMisses,
-					"linkCacheMisses":     cacheStats.LinkCacheMisses,
-				},
-				"memory": gin.H{
-					"alloc":      m.Alloc,
-					"totalAlloc": m.TotalAlloc,
-					"sys":        m.Sys,
-					"numGC":      m.NumGC,
-				},
-				"stats": gin.H{
-					"errorRate":         currentStats.ErrorCount,
-					"totalRequests":     currentStats.TotalRequests,
-					"uniqueVisitors24h": len(currentStats.UniqueVisitors),
-				},
-			}
-
-			log.Printf("Sending health response: %+v\n", health)
-			c.JSON(http.StatusOK, health)
+			})
 		})
 
 		// SEO analysis endpoints
@@ -338,7 +296,7 @@ func main() {
 
 	// Create a server with graceful shutdown timeout
 	srv := &http.Server{
-		Addr:    ":" + port,
+		Addr:    "0.0.0.0:" + port,  // Explicitly bind to IPv4
 		Handler: r,
 	}
 
