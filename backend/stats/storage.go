@@ -14,21 +14,21 @@ import (
 // MonthlyStats represents statistics for a specific month
 type MonthlyStats struct {
 	// Cache statistics
-	AnalysisCacheHits   int            `json:"analysis_hits"`
-	AnalysisCacheMisses int            `json:"analysis_misses"`
-	LinkCacheHits       int            `json:"link_hits"`
-	LinkCacheMisses     int            `json:"link_misses"`
-	
+	AnalysisCacheHits   int `json:"analysis_hits"`
+	AnalysisCacheMisses int `json:"analysis_misses"`
+	LinkCacheHits       int `json:"link_hits"`
+	LinkCacheMisses     int `json:"link_misses"`
+
 	// General statistics
-	UniqueVisitors      map[string]time.Time `json:"unique_visitors"`
-	AnalysisRequests    int                  `json:"analysis_requests"`
-	ErrorCount          int                  `json:"error_count"`
-	PopularUrls         map[string]int       `json:"popular_urls"`
-	TotalLoadTime       float64              `json:"total_load_time"`
-	TotalRequests       int                  `json:"total_requests"`
-	
+	UniqueVisitors   map[string]time.Time `json:"unique_visitors"`
+	AnalysisRequests int                  `json:"analysis_requests"`
+	ErrorCount       int                  `json:"error_count"`
+	PopularUrls      map[string]int       `json:"popular_urls"`
+	TotalLoadTime    float64              `json:"total_load_time"`
+	TotalRequests    int                  `json:"total_requests"`
+
 	// Metadata
-	LastUpdated         time.Time            `json:"last_updated"`
+	LastUpdated time.Time `json:"last_updated"`
 }
 
 // NewMonthlyStats creates a new MonthlyStats instance with initialized maps
@@ -53,7 +53,7 @@ type Storage struct {
 // NewStorage creates a new statistics storage instance
 func NewStorage(dataDir string) (*Storage, error) {
 	log.Printf("Initializing storage with data directory: %s", dataDir)
-	
+
 	// Ensure data directory exists
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
@@ -169,13 +169,13 @@ func (s *Storage) migrateOldStats(dataDir string) error {
 	for url, count := range oldStats.PopularUrls {
 		stats.PopularUrls[url] += count // Add to existing count if any
 	}
-	
+
 	// Preserve existing counters by adding old values
 	stats.AnalysisRequests += oldStats.AnalysisRequests
 	stats.ErrorCount += oldStats.ErrorCount
 	stats.TotalLoadTime += oldStats.AverageLoadTime * float64(oldStats.TotalRequests)
 	stats.TotalRequests += oldStats.TotalRequests
-	
+
 	// Preserve cache statistics
 	stats.AnalysisCacheHits += oldStats.AnalysisCacheHits
 	stats.AnalysisCacheMisses += oldStats.AnalysisCacheMisses
@@ -207,7 +207,7 @@ func (s *Storage) TrackVisitor(ip string) {
 	}
 
 	month := getCurrentMonth()
-	
+
 	// Check existence under read lock
 	s.mutex.RLock()
 	stats, exists := s.stats[month]
@@ -254,7 +254,7 @@ func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
 	}
 
 	month := getCurrentMonth()
-	
+
 	// Use shorter lock duration for checking existence
 	s.mutex.RLock()
 	stats, exists := s.stats[month]
@@ -281,7 +281,7 @@ func (s *Storage) TrackAnalysis(url string, loadTime float64, isError bool) {
 	stats.LastUpdated = time.Now()
 	s.mutex.Unlock()
 
-	log.Printf("Updated stats after analysis for %s: requests=%d, total=%d, errors=%d", 
+	log.Printf("Updated stats after analysis for %s: requests=%d, total=%d, errors=%d",
 		url, stats.AnalysisRequests, stats.TotalRequests, stats.ErrorCount)
 
 	// Check write timing under a short lock
@@ -333,7 +333,7 @@ func (s *Storage) load() error {
 		// Preserve any existing data by merging
 		if existingStats, exists := s.stats[month]; exists {
 			log.Printf("Found existing stats for month %s: %+v", month, existingStats)
-			
+
 			// Merge unique visitors
 			for ip, timestamp := range existingStats.UniqueVisitors {
 				if _, ok := stats.UniqueVisitors[ip]; !ok {
@@ -481,7 +481,7 @@ func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMis
 	}
 
 	month := getCurrentMonth()
-	
+
 	// Check existence under read lock
 	s.mutex.RLock()
 	stats, exists := s.stats[month]
@@ -503,7 +503,7 @@ func (s *Storage) IncrementStats(analysisHits, analysisMisses, linkHits, linkMis
 	stats.LastUpdated = time.Now()
 	s.mutex.Unlock()
 
-	log.Printf("Updated cache stats: hits=%d/%d, misses=%d/%d", 
+	log.Printf("Updated cache stats: hits=%d/%d, misses=%d/%d",
 		stats.AnalysisCacheHits, stats.LinkCacheHits,
 		stats.AnalysisCacheMisses, stats.LinkCacheMisses)
 
@@ -528,7 +528,7 @@ func (s *Storage) GetCurrentStats() MonthlyStats {
 	}
 
 	month := getCurrentMonth()
-	
+
 	s.mutex.RLock()
 	stats, exists := s.stats[month]
 	s.mutex.RUnlock()
@@ -574,10 +574,11 @@ func (s *Storage) GetCurrentStats() MonthlyStats {
 func (s *Storage) Cleanup(retainMonths int) {
 	currentTime := time.Now()
 	currentMonth := currentTime.Format("2006-01")
-	
+
 	// Calculate previous month
 	previousMonth := currentTime.AddDate(0, -1, 0).Format("2006-01")
 
+	// Trim stats under lock, but perform disk write after unlocking to avoid self-deadlock
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -588,11 +589,12 @@ func (s *Storage) Cleanup(retainMonths int) {
 		}
 	}
 
-	// Request a write to persist changes
-	s.requestWrite()
-	
 	// Log retained months for debugging
 	log.Printf("Retained statistics for months: %s, %s", currentMonth, previousMonth)
+
+	// Request a write to persist changes (must be done after releasing the lock)
+	// Call in a goroutine to avoid blocking if the writer is busy
+	go s.requestWrite()
 }
 
 // GetMonthlyStats returns statistics for a specific month
@@ -615,10 +617,10 @@ func (s *Storage) GetAllMonths() []string {
 	for month := range s.stats {
 		months = append(months, month)
 	}
-	
+
 	// Sort months in descending order (newest first)
 	sort.Sort(sort.Reverse(sort.StringSlice(months)))
-	
+
 	return months
 }
 
@@ -629,7 +631,7 @@ func (s *Storage) Shutdown() error {
 	}
 
 	log.Printf("Shutting down statistics storage")
-	
+
 	// Signal the background writer to stop and perform final write
 	close(s.done)
 
@@ -640,4 +642,4 @@ func (s *Storage) Shutdown() error {
 
 	log.Printf("Statistics storage shutdown complete")
 	return nil
-} 
+}

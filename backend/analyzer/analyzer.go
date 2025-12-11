@@ -231,7 +231,9 @@ func (a *Analyzer) SetMaxCacheSize(size int) {
 	a.cacheMutex.Lock()
 	defer a.cacheMutex.Unlock()
 	a.maxCacheSize = size
-	a.cleanup() // Run cleanup immediately if new size is smaller
+
+	// Run cleanup after unlocking to avoid self-deadlock on cacheMutex
+	go a.cleanup()
 }
 
 // SetMaxLinkCacheSize sets the maximum number of entries in the link cache
@@ -239,7 +241,9 @@ func (a *Analyzer) SetMaxLinkCacheSize(size int) {
 	a.linkCacheMutex.Lock()
 	defer a.linkCacheMutex.Unlock()
 	a.maxLinkCacheSize = size
-	a.cleanup() // Run cleanup immediately if new size is smaller
+
+	// Run cleanup after unlocking to avoid self-deadlock on linkCacheMutex
+	go a.cleanup()
 }
 
 // SetCacheTTL sets the cache TTL
