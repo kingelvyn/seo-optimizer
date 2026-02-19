@@ -305,6 +305,12 @@ func (s *Storage) load() error {
 		return err
 	}
 
+	// Treat empty file as "no data yet"
+    if len(data) == 0 {
+        log.Printf("Stats file is empty, starting fresh")
+        return nil
+    }
+
 	log.Printf("Loading stats from file: %s", string(data))
 
 	s.mutex.Lock()
