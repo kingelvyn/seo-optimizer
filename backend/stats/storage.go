@@ -319,8 +319,11 @@ func (s *Storage) load() error {
 	// Create temporary map for loading
 	tempStats := make(map[string]*MonthlyStats)
 	if err := json.Unmarshal(data, &tempStats); err != nil {
-		log.Printf("Error unmarshaling stats: %v", err)
-		return err
+		/*log.Printf("Error unmarshaling stats: %v", err)
+		return err*/
+		log.Printf("Stats file is invalid JSON, backing up and starting fresh: %v", err)
+        _ = os.Rename(s.filePath, s.filePath+".corrupt."+time.Now().Format("20060102_150405"))
+        return nil
 	}
 
 	log.Printf("Loaded stats before initialization: %+v", tempStats)
